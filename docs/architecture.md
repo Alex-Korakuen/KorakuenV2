@@ -22,7 +22,7 @@ The system tracks:
 - All cash movements: inbound and outbound, across multiple bank accounts
 - Partner cost contributions and profit split calculations
 - Peruvian tax obligations: IGV position, detracciones, SUNAT document metadata
-- Bank reconciliation: matching recorded transactions to bank statement entries
+- Bank reconciliation: matching recorded payments to bank statement entries
 
 ---
 
@@ -100,7 +100,7 @@ korakuen/
   lib/
     validators/               — all validation logic, one file per domain
       invoices.ts
-      transactions.ts
+      payments.ts
       contacts.ts
       ...
     lifecycle.ts              — status transition rules for all document types
@@ -339,7 +339,7 @@ current database state.
 ### 3. The database is the source of truth for balances
 
 No balance, outstanding amount, or financial position is stored as a column if it
-can be derived from transactions. Bank account balances, invoice outstanding amounts,
+can be derived from payments. Bank account balances, invoice outstanding amounts,
 partner profit shares — all derived at query time. Storing derived values creates
 inconsistency risk with no arbiter.
 
@@ -361,7 +361,7 @@ it is automatic and cannot be bypassed.
 ### 6. Amounts always stored in original currency with PEN equivalent
 
 Every monetary amount is stored as `amount` + `currency` (original) and `amount_pen`
-(PEN equivalent at transaction time). Reports aggregate `amount_pen`. Original amounts
+(PEN equivalent at payment time). Reports aggregate `amount_pen`. Original amounts
 are immutable once recorded.
 
 ### 7. IGV and detracciones are first-class fields

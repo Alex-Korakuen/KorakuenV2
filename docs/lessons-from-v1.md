@@ -108,7 +108,7 @@ UPDATE, DELETE on financial tables produces an immutable audit row with before/a
 state. Automatic, zero application code needed.
 
 ### 7. No bank reconciliation
-V1 had no way to mark transactions as reconciled with the bank statement. This made
+V1 had no way to mark payments as reconciled with the bank statement. This made
 month-end reconciliation a manual process outside the system.
 
 **V2 fix:** `reconciled`, `bank_reference`, `reconciled_at`, `reconciled_by` fields

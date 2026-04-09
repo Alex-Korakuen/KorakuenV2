@@ -25,7 +25,7 @@ These rules apply to all tables unless explicitly noted as an exception.
 - **Smallint enums:** Enum-like fields stored as `smallint`. Mappings in the table
   below. Never raw strings for status fields.
 - **No stored derived values:** Balances, outstanding amounts, and totals derivable
-  from transactions are not stored. Computed by the engine at query time and returned
+  from payment records are not stored. Computed by the engine at query time and returned
   in API responses under `_computed`.
 - **Exception — header totals:** `subtotal`, `igv_amount`, and `total` on document
   headers (`outgoing_quotes`, `outgoing_invoices`, `incoming_quotes`,
@@ -63,8 +63,8 @@ These rules apply to all tables unless explicitly noted as an exception.
 
 - `activity_log` — immutable append-only. No soft delete, no updated_at.
 - `exchange_rates` — append-only reference table. Never edited or deleted.
-- `payment_invoice_allocations` — no soft delete. Deletable only by admin before
-  the invoice reaches `matched` status.
+- `payment_lines` — no soft delete. Hard-deleted when removed. Immutable on
+  reconciled payments.
 
 ---
 
@@ -183,7 +183,7 @@ contacts
 
 ### `bank_accounts`
 
-Korakuen's own bank accounts. Every transaction must reference one.
+Korakuen's own bank accounts. Every payment must reference one.
 Balance is always derived — never stored.
 
 ```sql
@@ -558,7 +558,7 @@ almost always after payment has already been made.
 
 **Lifecycle:** `unmatched → partially_matched → matched`
 
-Status is driven automatically by the engine based on `payment_invoice_allocations`:
+Status is driven automatically by the engine based on `payment_lines`:
 - `SUM(allocated) = 0` → `unmatched`
 - `0 < SUM(allocated) < total_pen` → `partially_matched`
 - `SUM(allocated) >= total_pen` → `matched`

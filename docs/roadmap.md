@@ -54,11 +54,11 @@ Run migrations in the Supabase SQL editor (`korakuen-prod`) in this order:
 2. Infrastructure: `users`, `exchange_rates`, `activity_log`
 3. Core: `contacts`, `bank_accounts`
 4. Projects: `projects`, `project_partners`
-5. Revenue: `outgoing_quotes`, `outgoing_quote_line_items`, `contracts`,
+5. Revenue: `outgoing_quotes`, `outgoing_quote_line_items`,
    `outgoing_invoices`, `outgoing_invoice_line_items`
 6. Costs: `incoming_quotes`, `incoming_quote_line_items`,
    `incoming_invoices`, `incoming_invoice_line_items`
-7. Cash: `transactions`, `payment_invoice_allocations`
+7. Cash: `payments`, `payment_lines`
 8. Submissions: `submissions`
 9. Indexes: all indexes from `schema-reference.md`
 10. Activity log trigger (see below)
@@ -93,7 +93,7 @@ CREATE TRIGGER log_outgoing_invoices
   FOR EACH ROW EXECUTE FUNCTION log_financial_mutation();
 
 -- Repeat for: incoming_invoices, outgoing_quotes, incoming_quotes,
--- transactions, payment_invoice_allocations, contracts, projects
+-- payments, payment_lines, projects
 ```
 
 **Initial RLS policies:**
@@ -128,7 +128,7 @@ lib/
   validators/
     contacts.ts      — RUC/DNI format, SUNAT verification flow
     invoices.ts      — totals consistency, IGV validation, SUNAT XML
-    transactions.ts  — BN account rules, detraction consistency, over-allocation
+    payments.ts      — BN account rules, detraction consistency, over-allocation
     projects.ts      — profit split sum, status transitions
     quotes.ts        — line item consistency, immutability rules
   sunat.ts           — decolecta API wrapper (RUC/DNI lookup)
@@ -210,7 +210,7 @@ Server actions in `app/actions/bank-accounts.ts`:
 - `getBankAccounts()` — each account includes computed `balance_pen`
 - `createBankAccount(data)`
 - `updateBankAccount(id, data)`
-- `archiveBankAccount(id)` — blocks if transactions exist
+- `archiveBankAccount(id)` — blocks if payments exist
 
 **Balance computation (called on every list fetch):**
 ```typescript
@@ -303,10 +303,6 @@ Server actions for:
 - Line item immutability enforced in `validators/quotes.ts`
 - Header totals recomputed after every line item mutation
 
-**Contracts:**
-- Create (from quote or direct), read, update
-- `getContractSummary(id)` — total value, total invoiced, remaining
-
 **Outgoing invoices:**
 - Full CRUD with line items
 - Status: draft → sent → partially_paid → paid | void
@@ -315,7 +311,7 @@ Server actions for:
   `outstanding_bn`, `is_fully_paid`
 - SUNAT XML validation in `validators/invoices.ts`
 
-**Commit:** `feat: revenue documents — quotes, contracts, outgoing invoices with line items`
+**Commit:** `feat: revenue documents — quotes, outgoing invoices with line items`
 
 ---
 
@@ -338,37 +334,38 @@ Server actions for:
 
 ---
 
-### Step 10 — Transactions and Allocations
+### Step 10 — Payments and Payment Lines
 
 Server actions for:
 
-**Transactions:**
-- `getTransactions(filters)` — all filters from schema (project, account, direction,
-  contact, date range, reconciled, type)
-- `createTransaction(data)` — validates BN rules, detraction consistency,
-  computes `amount_pen`
-- `updateTransaction(id, data)` — blocked if reconciled
-- `deleteTransaction(id)` — soft delete, blocked if reconciled
+**Payments (header):**
+- `getPayments(filters)` — all filters from schema (project, account, direction,
+  contact, date range, reconciled)
+- `createPayment(data)` — validates BN rules, detraction consistency,
+  computes `total_amount_pen`
+- `updatePayment(id, data)` — blocked if reconciled
+- `deletePayment(id)` — soft delete, blocked if reconciled
 
-**Payment allocations:**
-- `getEligiblePayments(invoiceId, invoiceType)` — filtered list of transactions
+**Payment lines (detail):**
+- `addPaymentLine(paymentId, data)` — validates line_type rules, over-allocation,
+  invoice exclusivity. Recomputes payment header totals.
+- `removePaymentLine(lineId)` — blocked if payment is reconciled.
+  Recomputes payment header totals.
+- `getEligiblePayments(invoiceId, invoiceType)` — filtered list of payments
   eligible to allocate to this invoice (same contact or no contact, unallocated balance > 0)
-- `allocatePayment(transactionId, invoiceId, invoiceType, amount)` — validates
-  amount doesn't exceed available balance or invoice outstanding
-- `deallocatePayment(allocationId)` — blocked if invoice is matched
 
-**Allocation auto-updates invoice status** after every create/delete.
+**Payment line mutations auto-update invoice status** (unmatched → partially_matched → matched).
 
-**Commit:** `feat: transactions CRUD, payment allocations, eligible payment filter`
+**Commit:** `feat: payments CRUD, payment lines, eligible payment filter`
 
 ---
 
 ### Step 11 — Bank Reconciliation
 
-- `getUnreconciled(bankAccountId)` — transactions with `reconciled = false`
-- `reconcileTransaction(id, bankReference)` — marks reconciled
-- `unreconcileTransaction(id)` — reverts
-- `reconcileGroup(groupId, bankReference)` — reconciles all transactions in a
+- `getUnreconciled(bankAccountId)` — payments with `reconciled = false`
+- `reconcilePayment(id, bankReference)` — marks reconciled
+- `unreconcilePayment(id)` — reverts
+- `reconcileGroup(groupId, bankReference)` — reconciles all payments in a
   `reconciliation_group_id` atomically
 
 **Commit:** `feat: bank reconciliation`
@@ -397,9 +394,9 @@ Priority order:
 
 1. Auth flow and role-based layout
 2. Projects list with status indicators and financial summary
-3. Project detail — contract, invoice list, transaction list, settlement
+3. Project detail — contract, invoice list, payment list, settlement
 4. New outgoing invoice form (with line items)
-5. New transaction form (with eligible payment matching)
+5. New payment form (with payment lines and invoice matching)
 6. Bank reconciliation queue UI
 7. Reports: cash position, IGV, outstanding receivables
 8. Partner view — restricted to assigned projects, their costs, their profit share
@@ -413,7 +410,7 @@ Priority order:
 
 - Submissions table UI for admin — review queue, approve/reject
 - Partner submission form — upload image/PDF/XML, review extracted data
-- Approval flow — engine promotes to `incoming_invoices` or `transactions`
+- Approval flow — engine promotes to `incoming_invoices` or `payments`
 
 **Commit:** `feat: submissions — staging workflow for partner scan uploads`
 

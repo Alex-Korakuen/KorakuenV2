@@ -160,7 +160,7 @@ The response shape is identical regardless of data presence. Example:
 ```json
 {
   "id": "uuid",
-  "commitment_id": null,
+  "incoming_quote_id": null,
   "detraction_rate": null,
   "detraction_amount": null,
   "xml_url": null
@@ -174,7 +174,7 @@ Clients never check for key existence. They always find the key, potentially nul
 ## Derived Values in API Responses
 
 Balances, outstanding amounts, and financial positions are never stored in the database
-if they can be derived from transactions. However, they ARE included in API responses
+if they can be derived from payments. However, they ARE included in API responses
 as computed fields — the engine calculates them at query time.
 
 Convention: computed fields are clearly labeled in the response:
