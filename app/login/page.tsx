@@ -16,20 +16,25 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
 
-    const supabase = createBrowserClient();
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const supabase = createBrowserClient();
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) {
-      setError("Credenciales incorrectas. Intente de nuevo.");
+      if (error) {
+        setError("Credenciales incorrectas. Intente de nuevo.");
+        return;
+      }
+
+      router.push("/");
+      router.refresh();
+    } catch {
+      setError("Error de conexión. Intente de nuevo.");
+    } finally {
       setLoading(false);
-      return;
     }
-
-    router.push("/");
-    router.refresh();
   }
 
   return (

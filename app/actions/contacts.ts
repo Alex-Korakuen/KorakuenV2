@@ -333,51 +333,56 @@ export async function deleteContact(
   }
 
   // Check all referencing tables for active records in parallel
-  const [
-    projects,
-    projectPartners,
-    outgoingQuotes,
-    incomingQuotes,
-    incomingInvoices,
-    payments,
-    loans,
-  ] = await Promise.all([
-    supabase
-      .from("projects")
-      .select("id", { count: "exact", head: true })
-      .eq("client_id", id)
-      .is("deleted_at", null),
-    supabase
-      .from("project_partners")
-      .select("id", { count: "exact", head: true })
-      .eq("contact_id", id)
-      .is("deleted_at", null),
-    supabase
-      .from("outgoing_quotes")
-      .select("id", { count: "exact", head: true })
-      .eq("contact_id", id)
-      .is("deleted_at", null),
-    supabase
-      .from("incoming_quotes")
-      .select("id", { count: "exact", head: true })
-      .eq("contact_id", id)
-      .is("deleted_at", null),
-    supabase
-      .from("incoming_invoices")
-      .select("id", { count: "exact", head: true })
-      .eq("contact_id", id)
-      .is("deleted_at", null),
-    supabase
-      .from("payments")
-      .select("id", { count: "exact", head: true })
-      .or(`contact_id.eq.${id},paid_by_partner_id.eq.${id}`)
-      .is("deleted_at", null),
-    supabase
-      .from("loans")
-      .select("id", { count: "exact", head: true })
-      .or(`borrowing_partner_id.eq.${id},lender_contact_id.eq.${id}`)
-      .is("deleted_at", null),
-  ]);
+  let projects, projectPartners, outgoingQuotes, incomingQuotes, incomingInvoices, payments, loans;
+  try {
+    [
+      projects,
+      projectPartners,
+      outgoingQuotes,
+      incomingQuotes,
+      incomingInvoices,
+      payments,
+      loans,
+    ] = await Promise.all([
+      supabase
+        .from("projects")
+        .select("id", { count: "exact", head: true })
+        .eq("client_id", id)
+        .is("deleted_at", null),
+      supabase
+        .from("project_partners")
+        .select("id", { count: "exact", head: true })
+        .eq("contact_id", id)
+        .is("deleted_at", null),
+      supabase
+        .from("outgoing_quotes")
+        .select("id", { count: "exact", head: true })
+        .eq("contact_id", id)
+        .is("deleted_at", null),
+      supabase
+        .from("incoming_quotes")
+        .select("id", { count: "exact", head: true })
+        .eq("contact_id", id)
+        .is("deleted_at", null),
+      supabase
+        .from("incoming_invoices")
+        .select("id", { count: "exact", head: true })
+        .eq("contact_id", id)
+        .is("deleted_at", null),
+      supabase
+        .from("payments")
+        .select("id", { count: "exact", head: true })
+        .or(`contact_id.eq.${id},paid_by_partner_id.eq.${id}`)
+        .is("deleted_at", null),
+      supabase
+        .from("loans")
+        .select("id", { count: "exact", head: true })
+        .or(`borrowing_partner_id.eq.${id},lender_contact_id.eq.${id}`)
+        .is("deleted_at", null),
+    ]);
+  } catch {
+    return failure("VALIDATION_ERROR", "No se pudo verificar las referencias del contacto");
+  }
 
   const references: string[] = [];
   if ((projects.count ?? 0) > 0) references.push("projects");

@@ -36,10 +36,10 @@ export async function getExchangeRate(
 
   if (error || !data) return null;
 
-  return {
-    rate: Number(data.rate),
-    rate_date: data.rate_date,
-  };
+  const rate = Number(data.rate);
+  if (!Number.isFinite(rate) || rate <= 0) return null;
+
+  return { rate, rate_date: data.rate_date };
 }
 
 /**
