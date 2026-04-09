@@ -2,6 +2,7 @@
 
 import { requireUser, requireAdmin } from "@/lib/auth";
 import { createServerClient } from "@/lib/db";
+import { normalizePagination, fetchActiveById } from "@/lib/db-helpers";
 import { success, failure } from "@/lib/types";
 import type {
   ValidationResult,
@@ -43,8 +44,7 @@ export async function getContacts(
 ): Promise<ValidationResult<PaginatedContacts>> {
   await requireUser();
 
-  const limit = Math.min(Math.max(filters?.limit ?? 50, 1), 200);
-  const offset = Math.max(filters?.offset ?? 0, 0);
+  const { limit, offset } = normalizePagination(filters?.limit, filters?.offset);
 
   const supabase = await createServerClient();
 
@@ -273,26 +273,19 @@ export async function updateContact(
 
   const supabase = await createServerClient();
 
-  // Fetch existing contact
-  const { data: existing, error: fetchError } = await supabase
-    .from("contacts")
-    .select("*")
-    .eq("id", id)
-    .is("deleted_at", null)
-    .single();
-
-  if (fetchError || !existing) {
+  const existing = await fetchActiveById<ContactRow>(supabase, "contacts", id);
+  if (!existing) {
     return failure("NOT_FOUND", "Contact not found");
   }
 
-  const validation = validateUpdateContact(data, existing as ContactRow);
+  const validation = validateUpdateContact(data, existing);
   if (!validation.success) return validation;
 
   const updateFields = validation.data;
 
   // If no fields to update, return existing row unchanged
   if (Object.keys(updateFields).length === 0) {
-    return success(existing as ContactRow);
+    return success(existing);
   }
 
   const { data: updated, error: updateError } = await supabase
@@ -320,15 +313,8 @@ export async function deleteContact(
 
   const supabase = await createServerClient();
 
-  // Fetch existing contact
-  const { data: existing, error: fetchError } = await supabase
-    .from("contacts")
-    .select("id")
-    .eq("id", id)
-    .is("deleted_at", null)
-    .single();
-
-  if (fetchError || !existing) {
+  const existing = await fetchActiveById(supabase, "contacts", id, "id");
+  if (!existing) {
     return failure("NOT_FOUND", "Contact not found");
   }
 

@@ -97,6 +97,11 @@ export function validateDocumentTotals(
 // Shared validation helpers
 // ---------------------------------------------------------------------------
 
+import {
+  validateCurrencyExchangeRate,
+  validateDetractionConsistency,
+} from "./shared";
+
 function validateTotalConsistency(
   subtotal: number,
   igv_amount: number,
@@ -107,35 +112,6 @@ function validateTotalConsistency(
   if (!withinTolerance(total, expectedTotal)) {
     fields.total =
       `Must equal subtotal + igv_amount. Expected ${expectedTotal.toFixed(2)}, received ${total.toFixed(2)}`;
-  }
-  return fields;
-}
-
-function validateCurrencyExchangeRate(
-  currency: string | undefined,
-  exchange_rate: number | null | undefined,
-): Record<string, string> {
-  const fields: Record<string, string> = {};
-  const cur = currency ?? "PEN";
-  if (cur !== "PEN" && cur !== "USD") {
-    fields.currency = "Must be PEN or USD";
-  }
-  if (cur === "USD" && !exchange_rate) {
-    fields.exchange_rate = "Required when currency is USD";
-  }
-  return fields;
-}
-
-function validateDetractionConsistency(
-  rate: number | null | undefined,
-  amount: number | null | undefined,
-): Record<string, string> {
-  const fields: Record<string, string> = {};
-  const hasRate = rate != null;
-  const hasAmount = amount != null;
-  if (hasRate !== hasAmount) {
-    fields.detraction_rate = "Both detraction_rate and detraction_amount must be provided, or neither";
-    fields.detraction_amount = "Both detraction_rate and detraction_amount must be provided, or neither";
   }
   return fields;
 }

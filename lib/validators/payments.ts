@@ -12,6 +12,7 @@ import type {
   CreatePaymentLineInput,
   BankAccountRow,
 } from "@/lib/types";
+import { validateCurrencyExchangeRate } from "./shared";
 
 // ---------------------------------------------------------------------------
 // Payment header validation
@@ -39,13 +40,8 @@ export function validateCreatePayment(
   }
 
   // Currency validation
+  Object.assign(fields, validateCurrencyExchangeRate(data.currency, data.exchange_rate));
   const currency = data.currency ?? "PEN";
-  if (currency !== "PEN" && currency !== "USD") {
-    fields.currency = "Must be PEN or USD";
-  }
-  if (currency === "USD" && !data.exchange_rate) {
-    fields.exchange_rate = "Required when currency is USD";
-  }
 
   // paid_by_partner_id only allowed on outbound (DB constraint: pay_direction_partner)
   if (data.paid_by_partner_id && data.direction !== PAYMENT_DIRECTION.outbound) {

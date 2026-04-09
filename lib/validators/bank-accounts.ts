@@ -5,6 +5,7 @@ import type {
   UpdateBankAccountInput,
   BankAccountRow,
 } from "@/lib/types";
+import { validateImmutableFields } from "./shared";
 
 // ---------------------------------------------------------------------------
 // Create validation
@@ -68,7 +69,10 @@ export function validateCreateBankAccount(
 // Update validation
 // ---------------------------------------------------------------------------
 
-const IMMUTABLE_FIELDS = ["currency", "account_type"] as const;
+const IMMUTABLE_BANK_ACCOUNT_FIELDS: (keyof BankAccountRow)[] = [
+  "currency",
+  "account_type",
+];
 
 const ALLOWED_FIELDS: (keyof UpdateBankAccountInput)[] = [
   "name",
@@ -83,14 +87,17 @@ export function validateUpdateBankAccount(
   _existing: BankAccountRow,
 ): ValidationResult<Partial<UpdateBankAccountInput>> {
   // Reject immutable fields
-  for (const field of IMMUTABLE_FIELDS) {
-    if (field in data) {
-      return failure(
-        "IMMUTABLE_FIELD",
-        `Field '${field}' cannot be changed after creation`,
-        { [field]: "Immutable after creation" },
-      );
-    }
+  const immutableErrors = validateImmutableFields<BankAccountRow>(
+    data,
+    IMMUTABLE_BANK_ACCOUNT_FIELDS,
+  );
+  if (Object.keys(immutableErrors).length > 0) {
+    const field = Object.keys(immutableErrors)[0];
+    return failure(
+      "IMMUTABLE_FIELD",
+      `Field '${field}' cannot be changed after creation`,
+      immutableErrors,
+    );
   }
 
   // Filter to allowed fields only

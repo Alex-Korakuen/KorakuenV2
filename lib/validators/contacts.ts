@@ -9,6 +9,7 @@ import type {
   UpdateContactInput,
   ContactRow,
 } from "@/lib/types";
+import { validateImmutableFields } from "./shared";
 
 /**
  * Validate RUC format: exactly 11 digits, all numeric.
@@ -104,28 +105,24 @@ export function validateUpdateContact(
   data: Record<string, unknown>,
   existing: ContactRow,
 ): ValidationResult<UpdateContactInput> {
-  const fields: Record<string, string> = {};
-
   // Immutable fields — block if present and different from existing
-  const immutableFields: (keyof ContactRow)[] = [
-    "ruc",
-    "dni",
-    "razon_social",
-    "tipo_persona",
-    "sunat_estado",
-    "sunat_condicion",
-    "sunat_verified",
-    "sunat_verified_at",
-  ];
+  const immutableErrors = validateImmutableFields<ContactRow>(
+    data,
+    [
+      "ruc",
+      "dni",
+      "razon_social",
+      "tipo_persona",
+      "sunat_estado",
+      "sunat_condicion",
+      "sunat_verified",
+      "sunat_verified_at",
+    ],
+    existing,
+  );
 
-  for (const field of immutableFields) {
-    if (field in data && data[field] !== existing[field]) {
-      fields[field] = `Cannot modify ${field} after creation`;
-    }
-  }
-
-  if (Object.keys(fields).length > 0) {
-    return failure("IMMUTABLE_FIELD", "Cannot modify locked fields", fields);
+  if (Object.keys(immutableErrors).length > 0) {
+    return failure("IMMUTABLE_FIELD", "Cannot modify locked fields", immutableErrors);
   }
 
   // Extract only editable fields
@@ -143,25 +140,4 @@ export function validateUpdateContact(
   return success(update);
 }
 
-/**
- * Check if SUNAT estado/condicion warrant a user warning.
- * Returns a warning string (in Spanish) or null.
- * This is NOT a validation error — it is surfaced for user confirmation.
- */
-export function checkSunatWarnings(
-  sunat_estado: string | null,
-  sunat_condicion: string | null,
-): string | null {
-  const warnings: string[] = [];
-
-  if (sunat_estado && sunat_estado !== "ACTIVO") {
-    warnings.push(`estado ${sunat_estado}`);
-  }
-  if (sunat_condicion && sunat_condicion !== "HABIDO") {
-    warnings.push(`condicion ${sunat_condicion}`);
-  }
-
-  if (warnings.length === 0) return null;
-
-  return `Este contribuyente tiene ${warnings.join(" y ")} en SUNAT. ¿Desea continuar?`;
-}
+// checkSunatWarnings lives in lib/sunat.ts — import from there, not here

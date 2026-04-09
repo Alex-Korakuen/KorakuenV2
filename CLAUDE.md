@@ -112,6 +112,7 @@ Staging:         submissions
 - Follow snake_case naming for all tables, columns, API params, JSON keys
 - Show a summary and ask for confirmation before any database mutation
 - Write server actions API-shaped: thin, with validation in `lib/validators/`
+- **Before writing any helper, utility, or validation logic:** search `lib/` for an existing implementation first. Check `lib/validators/shared.ts`, `lib/db-helpers.ts`, and other `lib/` files. If a function already exists that does what you need, import it — do not rewrite it. If an existing function is close but not quite right, extend it rather than creating a parallel version
 
 ### Never do without explicit approval:
 - Modify the database schema

@@ -3,8 +3,9 @@ export {
   validateDni,
   validateCreateContact,
   validateUpdateContact,
-  checkSunatWarnings,
 } from "./contacts";
+
+export { checkSunatWarnings } from "@/lib/sunat";
 
 export {
   validateLineItemMath,
@@ -41,3 +42,9 @@ export {
   validateCreateBankAccount,
   validateUpdateBankAccount,
 } from "./bank-accounts";
+
+export {
+  validateCurrencyExchangeRate,
+  validateDetractionConsistency,
+  validateImmutableFields,
+} from "./shared";

@@ -10,6 +10,10 @@ import type {
   CreateOutgoingQuoteInput,
   CreateIncomingQuoteInput,
 } from "@/lib/types";
+import {
+  validateCurrencyExchangeRate,
+  validateDetractionConsistency,
+} from "./shared";
 
 // ---------------------------------------------------------------------------
 // Outgoing quote validation
@@ -35,10 +39,7 @@ export function validateOutgoingQuote(
     fields.issue_date = "Required";
   }
 
-  const currency = data.currency ?? "PEN";
-  if (currency !== "PEN" && currency !== "USD") {
-    fields.currency = "Must be PEN or USD";
-  }
+  Object.assign(fields, validateCurrencyExchangeRate(data.currency, null));
 
   if (Object.keys(fields).length > 0) {
     return failure("VALIDATION_ERROR", "Outgoing quote validation failed", fields);
@@ -67,24 +68,8 @@ export function validateIncomingQuote(
     fields.description = "Required";
   }
 
-  const currency = data.currency ?? "PEN";
-  if (currency !== "PEN" && currency !== "USD") {
-    fields.currency = "Must be PEN or USD";
-  }
-
-  if (currency === "USD" && !data.exchange_rate) {
-    fields.exchange_rate = "Required when currency is USD";
-  }
-
-  // Detraction consistency
-  const hasRate = data.detraction_rate != null;
-  const hasAmount = data.detraction_amount != null;
-  if (hasRate !== hasAmount) {
-    fields.detraction_rate =
-      "Both detraction_rate and detraction_amount must be provided, or neither";
-    fields.detraction_amount =
-      "Both detraction_rate and detraction_amount must be provided, or neither";
-  }
+  Object.assign(fields, validateCurrencyExchangeRate(data.currency, data.exchange_rate));
+  Object.assign(fields, validateDetractionConsistency(data.detraction_rate, data.detraction_amount));
 
   if (Object.keys(fields).length > 0) {
     return failure("VALIDATION_ERROR", "Incoming quote validation failed", fields);

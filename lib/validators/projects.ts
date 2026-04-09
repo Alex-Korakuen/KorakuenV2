@@ -10,6 +10,7 @@ import type {
   CreateProjectInput,
 } from "@/lib/types";
 import { assertTransition } from "@/lib/lifecycle";
+import { validateCurrencyExchangeRate } from "./shared";
 
 // ---------------------------------------------------------------------------
 // Profit split validation
@@ -116,16 +117,13 @@ export function validateCreateProject(
     fields.client_id = "Required";
   }
 
-  const currency = data.contract_currency ?? "PEN";
-  if (currency !== "PEN" && currency !== "USD") {
-    fields.contract_currency = "Must be PEN or USD";
-  }
-
-  if (
-    currency === "USD" &&
-    data.contract_value != null &&
-    data.contract_exchange_rate == null
-  ) {
+  // Currency — reuse shared helper with field name mapping
+  const currencyErrors = validateCurrencyExchangeRate(
+    data.contract_currency,
+    data.contract_value != null ? data.contract_exchange_rate : 1,
+  );
+  if (currencyErrors.currency) fields.contract_currency = currencyErrors.currency;
+  if (currencyErrors.exchange_rate) {
     fields.contract_exchange_rate =
       "Required when contract currency is USD and contract value is set";
   }

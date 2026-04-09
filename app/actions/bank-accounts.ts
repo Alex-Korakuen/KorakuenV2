@@ -2,6 +2,7 @@
 
 import { requireAdmin } from "@/lib/auth";
 import { createServerClient } from "@/lib/db";
+import { normalizePagination, fetchActiveById } from "@/lib/db-helpers";
 import { success, failure } from "@/lib/types";
 import type {
   ValidationResult,
@@ -46,8 +47,7 @@ export async function getBankAccounts(
 ): Promise<ValidationResult<PaginatedBankAccounts>> {
   await requireAdmin();
 
-  const limit = Math.min(Math.max(filters?.limit ?? 50, 1), 200);
-  const offset = Math.max(filters?.offset ?? 0, 0);
+  const { limit, offset } = normalizePagination(filters?.limit, filters?.offset);
 
   const supabase = await createServerClient();
 
@@ -148,24 +148,18 @@ export async function updateBankAccount(
 
   const supabase = await createServerClient();
 
-  const { data: existing, error: fetchError } = await supabase
-    .from("bank_accounts")
-    .select("*")
-    .eq("id", id)
-    .is("deleted_at", null)
-    .single();
-
-  if (fetchError || !existing) {
+  const existing = await fetchActiveById<BankAccountRow>(supabase, "bank_accounts", id);
+  if (!existing) {
     return failure("NOT_FOUND", "Bank account not found");
   }
 
-  const validation = validateUpdateBankAccount(data, existing as BankAccountRow);
+  const validation = validateUpdateBankAccount(data, existing);
   if (!validation.success) return validation as ValidationResult<BankAccountRow>;
 
   const updateFields = validation.data;
 
   if (Object.keys(updateFields).length === 0) {
-    return success(existing as BankAccountRow);
+    return success(existing);
   }
 
   const { data: updated, error: updateError } = await supabase
@@ -193,14 +187,8 @@ export async function archiveBankAccount(
 
   const supabase = await createServerClient();
 
-  const { data: existing, error: fetchError } = await supabase
-    .from("bank_accounts")
-    .select("id")
-    .eq("id", id)
-    .is("deleted_at", null)
-    .single();
-
-  if (fetchError || !existing) {
+  const existing = await fetchActiveById(supabase, "bank_accounts", id, "id");
+  if (!existing) {
     return failure("NOT_FOUND", "Bank account not found");
   }
 
