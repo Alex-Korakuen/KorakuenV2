@@ -9,9 +9,10 @@
 
 ## Phase 1 — 2-Tier: Next.js → Supabase
 
-*One repository. One language. Get the system working.*
+*One repository. One language. Proper patterns. Built to last.*
 
-The goal is a fully functional management system as fast as possible. Business logic
+The goal is a durable, correct management system — built on proper coding patterns
+and sound business logic. Business logic
 lives in `lib/validators/` and `lib/lifecycle.ts`. The activity log is handled by a
 Postgres trigger. Server actions are written API-shaped from the start — thin, with
 all validation centralized — so migrating to FastAPI later is a lift-and-shift, not
@@ -23,9 +24,8 @@ a rewrite.
 
 **Create 1 private GitHub repository:** `korakuen`
 
-**Create 2 Supabase projects:**
-- `korakuen-dev` — for all development. Never develop against prod.
-- `korakuen-prod` — production only.
+**Create 1 Supabase project:**
+- `korakuen-prod` — single project for now. Dev database added at the end of this roadmap.
 
 **Local setup:**
 ```
@@ -48,7 +48,7 @@ DECOLECTA_TOKEN=
 
 ### Step 1 — Database Schema
 
-Run migrations in the Supabase SQL editor (`korakuen-dev`) in this order:
+Run migrations in the Supabase SQL editor (`korakuen-prod`) in this order:
 
 1. Extensions: `CREATE EXTENSION IF NOT EXISTS "pgcrypto";`
 2. Infrastructure: `users`, `exchange_rates`, `activity_log`
@@ -416,6 +416,21 @@ Priority order:
 - Approval flow — engine promotes to `incoming_invoices` or `transactions`
 
 **Commit:** `feat: submissions — staging workflow for partner scan uploads`
+
+---
+
+### Step 15 — Dev Database
+
+Create a second Supabase project `korakuen-dev` to separate development from production:
+
+1. Create `korakuen-dev` Supabase project
+2. Run all migrations against `korakuen-dev`
+3. Set up `.env.local` to point to dev by default, `.env.production` to prod
+4. Seed dev database with representative test data
+5. Verify all server actions and reporting work against dev
+6. From this point forward: never develop against prod
+
+**Commit:** `feat: dev database — separate Supabase project, seed data, env config`
 
 ---
 

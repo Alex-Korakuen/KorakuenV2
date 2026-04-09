@@ -37,7 +37,7 @@ it is designed correctly from the start. Only the application layer evolves.
 Browser → Next.js (server actions) → Supabase (Postgres)
 ```
 
-**One repository. One language. Fastest path to a working system.**
+**One repository. One language. Proper patterns. Built to last.**
 
 Business logic lives in `lib/validators/` and `lib/lifecycle.ts`. The activity log
 is written by a Postgres trigger — zero application code needed. Server actions are
