@@ -397,6 +397,16 @@ export type PaymentRow = {
   deleted_at: string | null;
 };
 
+export type UserRow = {
+  id: string;
+  email: string;
+  display_name: string | null;
+  role: number;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+};
+
 export type PaymentLineRow = {
   id: string;
   payment_id: string;
