@@ -342,16 +342,15 @@ Authorization: Bearer {DECOLECTA_TOKEN}
 **RUC response fields used by Korakuen:**
 ```json
 {
-  "nombre": "EMPRESA EJEMPLO S.A.C.",
-  "tipoDocumento": "6",
-  "numeroDocumento": "20601030013",
+  "razon_social": "DAJOYA S.A.C",
+  "numero_documento": "20607291668",
   "estado": "ACTIVO",
   "condicion": "HABIDO",
-  "direccion": "AV. JAVIER PRADO ESTE NRO. 4600",
-  "distrito": "LA MOLINA",
+  "direccion": "AV. PARQUE DE LAS LEYENDAS NRO 210 DEP. 902A URB. PANDO",
+  "distrito": "SAN MIGUEL",
   "provincia": "LIMA",
   "departamento": "LIMA",
-  "ubigeo": "150112"
+  "ubigeo": "150136"
 }
 ```
 
@@ -364,11 +363,11 @@ Authorization: Bearer {DECOLECTA_TOKEN}
 **DNI response fields used by Korakuen:**
 ```json
 {
-  "nombre": "JUAN CARLOS",
-  "apellidoPaterno": "GARCIA",
-  "apellidoMaterno": "LOPEZ",
-  "tipoDocumento": "1",
-  "numeroDocumento": "46027897"
+  "full_name": "TERNERO FERREIRA ALEX SEBASTIAN",
+  "first_name": "ALEX SEBASTIAN",
+  "first_last_name": "TERNERO",
+  "second_last_name": "FERREIRA",
+  "document_number": "74096613"
 }
 ```
 
@@ -430,26 +429,25 @@ payment or have historical transactions. The warning is surfaced, the decision i
 
 | Decolecta field | Korakuen field |
 |---|---|
-| `nombre` | `razon_social` |
-| `numeroDocumento` | `ruc` |
+| `razon_social` | `razon_social` |
+| (input RUC) | `ruc` (stored as the input we provided) |
 | `estado` + `condicion` | displayed as warnings if not ACTIVO/HABIDO |
 | `direccion` | `address` |
 | `distrito` + `provincia` + `departamento` | `address` (concatenated) |
-| `tipoDocumento = "6"` | `tipo_persona = 2` (juridica) |
-| `tipoDocumento = "1"` | `tipo_persona = 1` (natural) |
+| RUC prefix `"20"` | `tipo_persona = 2` (juridica) |
+| RUC prefix other | `tipo_persona = 1` (natural) |
 
 **Field mapping — DNI to contact:**
 
 | Decolecta field | Korakuen field |
 |---|---|
-| `nombre` + `apellidoPaterno` + `apellidoMaterno` | `razon_social` (full name) |
-| `numeroDocumento` | stored in `dni` field (separate from `ruc`) |
-| `tipoDocumento = "1"` | `tipo_persona = 1` (natural) |
+| `full_name` | `razon_social` |
+| (input DNI) | `dni` (stored as the input we provided) |
+| always | `tipo_persona = 1` (natural) |
 
-**`sunat_verified` flag:** Contacts created via lookup are flagged
-`sunat_verified = true` + `sunat_verified_at = now()`. Contacts entered manually
-have `sunat_verified = false`. This lets you identify which contacts have been
-validated against the official registry.
+**`sunat_verified` flag:** All contacts are created via lookup and flagged
+`sunat_verified = true` + `sunat_verified_at = now()`. There is no manual
+creation path — the DB constraint `contact_must_be_verified` enforces this.
 
 **Fallback providers** (if decolecta is down or rate-limited):
 - `apiinti.dev` — 200 free queries/month, good docs

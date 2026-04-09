@@ -5,9 +5,8 @@ import { TIPO_PERSONA } from "@/lib/types";
 // ---------------------------------------------------------------------------
 
 type DecolectaRucResponse = {
-  nombre: string;
-  tipoDocumento: string;
-  numeroDocumento: string;
+  razon_social: string;
+  numero_documento: string;
   estado: string;
   condicion: string;
   direccion: string;
@@ -18,11 +17,11 @@ type DecolectaRucResponse = {
 };
 
 type DecolectaDniResponse = {
-  nombre: string;
-  apellidoPaterno: string;
-  apellidoMaterno: string;
-  tipoDocumento: string;
-  numeroDocumento: string;
+  full_name: string;
+  first_name: string;
+  first_last_name: string;
+  second_last_name: string;
+  document_number: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -110,16 +109,16 @@ export async function lookupRuc(ruc: string): Promise<LookupResult> {
 
   const data: DecolectaRucResponse = await res.json();
 
-  const tipo_persona =
-    data.tipoDocumento === "6"
-      ? TIPO_PERSONA.juridica
-      : TIPO_PERSONA.natural;
+  // RUCs starting with "20" are juridica (companies), others are natural persons
+  const tipo_persona = ruc.startsWith("20")
+    ? TIPO_PERSONA.juridica
+    : TIPO_PERSONA.natural;
 
   return {
     tipo_persona,
-    ruc: data.numeroDocumento,
+    ruc,
     dni: null,
-    razon_social: data.nombre,
+    razon_social: data.razon_social,
     address: buildAddress(data),
     sunat_estado: data.estado,
     sunat_condicion: data.condicion,
@@ -152,15 +151,11 @@ export async function lookupDni(dni: string): Promise<LookupResult> {
 
   const data: DecolectaDniResponse = await res.json();
 
-  const fullName = [data.nombre, data.apellidoPaterno, data.apellidoMaterno]
-    .filter(Boolean)
-    .join(" ");
-
   return {
     tipo_persona: TIPO_PERSONA.natural,
     ruc: null,
-    dni: data.numeroDocumento,
-    razon_social: fullName,
+    dni,
+    razon_social: data.full_name,
     address: null,
     sunat_estado: null,
     sunat_condicion: null,
