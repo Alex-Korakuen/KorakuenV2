@@ -20,7 +20,7 @@ a rewrite.
 
 ---
 
-### Step 0 — Setup
+### Step 0 — Setup ✅
 
 **Create 1 private GitHub repository:** `korakuen`
 
@@ -46,7 +46,7 @@ DECOLECTA_TOKEN=
 
 ---
 
-### Step 1 — Database Schema
+### Step 1 — Database Schema ✅
 
 Run migrations in the Supabase SQL editor (`korakuen-prod`) in this order:
 
@@ -117,7 +117,7 @@ CREATE POLICY "users_own_projects" ON projects
 
 ---
 
-### Step 2 — Project Structure
+### Step 2 — Project Structure ✅
 
 Create the core `lib/` structure before writing any server actions:
 
@@ -158,7 +158,7 @@ export function canTransition(table: string, from: number, to: number): boolean 
 
 ---
 
-### Step 3 — Auth
+### Step 3 — Auth ✅
 
 1. Supabase Auth setup (email/password, or magic link)
 2. Middleware in `middleware.ts` — refresh session on every request
