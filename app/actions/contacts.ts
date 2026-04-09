@@ -67,10 +67,13 @@ export async function getContacts(
   }
 
   if (filters?.search) {
-    const pattern = `%${filters.search}%`;
-    query = query.or(
-      `razon_social.ilike.${pattern},nombre_comercial.ilike.${pattern},ruc.ilike.${pattern},dni.ilike.${pattern}`,
-    );
+    const sanitized = filters.search.replace(/[.,()]/g, "");
+    if (sanitized.trim()) {
+      const pattern = `%${sanitized.trim()}%`;
+      query = query.or(
+        `razon_social.ilike.${pattern},nombre_comercial.ilike.${pattern},ruc.ilike.${pattern},dni.ilike.${pattern}`,
+      );
+    }
   }
 
   query = query
