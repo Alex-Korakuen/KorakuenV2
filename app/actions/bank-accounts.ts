@@ -2,7 +2,7 @@
 
 import { requireAdmin } from "@/lib/auth";
 import { createServerClient } from "@/lib/db";
-import { normalizePagination, fetchActiveById } from "@/lib/db-helpers";
+import { normalizePagination, fetchActiveById, nowISO } from "@/lib/db-helpers";
 import { success, failure } from "@/lib/types";
 import type {
   ValidationResult,
@@ -91,7 +91,7 @@ export async function getBankAccounts(
 
     if (!balanceError && balances) {
       for (const b of balances as { bank_account_id: string; balance_pen: number }[]) {
-        balanceMap[b.bank_account_id] = Number(b.balance_pen);
+        balanceMap[b.bank_account_id] = b.balance_pen;
       }
     }
   }
@@ -164,7 +164,7 @@ export async function updateBankAccount(
 
   const { data: updated, error: updateError } = await supabase
     .from("bank_accounts")
-    .update({ ...updateFields, updated_at: new Date().toISOString() })
+    .update({ ...updateFields, updated_at: nowISO() })
     .eq("id", id)
     .select()
     .single();
@@ -211,7 +211,7 @@ export async function archiveBankAccount(
     );
   }
 
-  const deletedAt = new Date().toISOString();
+  const deletedAt = nowISO();
   const { error: deleteError } = await supabase
     .from("bank_accounts")
     .update({ deleted_at: deletedAt })

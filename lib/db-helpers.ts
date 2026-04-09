@@ -1,5 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 200;
+
 /**
  * Normalize pagination params with sensible defaults and bounds.
  */
@@ -8,9 +11,17 @@ export function normalizePagination(
   offset?: number,
 ): { limit: number; offset: number } {
   return {
-    limit: Math.min(Math.max(limit ?? 50, 1), 200),
+    limit: Math.min(Math.max(limit ?? DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE),
     offset: Math.max(offset ?? 0, 0),
   };
+}
+
+/**
+ * Current UTC timestamp as ISO string. Centralizes timestamp generation
+ * for consistency and testability.
+ */
+export function nowISO(): string {
+  return new Date().toISOString();
 }
 
 /**

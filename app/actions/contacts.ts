@@ -2,7 +2,7 @@
 
 import { requireUser, requireAdmin } from "@/lib/auth";
 import { createServerClient } from "@/lib/db";
-import { normalizePagination, fetchActiveById } from "@/lib/db-helpers";
+import { normalizePagination, fetchActiveById, nowISO } from "@/lib/db-helpers";
 import { success, failure } from "@/lib/types";
 import type {
   ValidationResult,
@@ -209,7 +209,7 @@ export async function createContact(
   const input: CreateContactInput = {
     ...data,
     sunat_verified: true,
-    sunat_verified_at: new Date().toISOString(),
+    sunat_verified_at: nowISO(),
   };
 
   const validation = validateCreateContact(input);
@@ -290,7 +290,7 @@ export async function updateContact(
 
   const { data: updated, error: updateError } = await supabase
     .from("contacts")
-    .update({ ...updateFields, updated_at: new Date().toISOString() })
+    .update({ ...updateFields, updated_at: nowISO() })
     .eq("id", id)
     .select()
     .single();
@@ -388,7 +388,7 @@ export async function deleteContact(
   }
 
   // Soft delete
-  const deletedAt = new Date().toISOString();
+  const deletedAt = nowISO();
   const { error: deleteError } = await supabase
     .from("contacts")
     .update({ deleted_at: deletedAt })
