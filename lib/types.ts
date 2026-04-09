@@ -199,6 +199,23 @@ export type BankAccountRow = {
   deleted_at: string | null;
 };
 
+export type CreateBankAccountInput = {
+  name: string;
+  bank_name: string;
+  account_number?: string | null;
+  currency: string;
+  account_type?: number;
+  notes?: string | null;
+};
+
+export type UpdateBankAccountInput = {
+  name?: string;
+  bank_name?: string;
+  account_number?: string | null;
+  is_active?: boolean;
+  notes?: string | null;
+};
+
 export type ProjectRow = {
   id: string;
   name: string;

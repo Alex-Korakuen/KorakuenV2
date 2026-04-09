@@ -36,3 +36,8 @@ export {
   assertQuoteLineItemsMutable,
   validateWinningQuoteUniqueness,
 } from "./quotes";
+
+export {
+  validateCreateBankAccount,
+  validateUpdateBankAccount,
+} from "./bank-accounts";
