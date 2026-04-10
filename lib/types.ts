@@ -536,6 +536,34 @@ export type CreateOutgoingQuoteInput = {
   is_winning_quote?: boolean;
   currency?: string;
   notes?: string | null;
+  line_items?: LineItemInput[];
+};
+
+export type UpdateOutgoingQuoteInput = {
+  contact_id?: string;
+  issue_date?: string;
+  valid_until?: string | null;
+  currency?: string;
+  notes?: string | null;
+  pdf_url?: string | null;
+  drive_file_id?: string | null;
+};
+
+export type OutgoingQuoteLineItemRow = {
+  id: string;
+  outgoing_quote_id: string;
+  sort_order: number;
+  description: string;
+  unit: string | null;
+  quantity: number;
+  unit_price: number;
+  subtotal: number;
+  igv_applies: boolean;
+  igv_amount: number;
+  total: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type CreateOutgoingInvoiceInput = {

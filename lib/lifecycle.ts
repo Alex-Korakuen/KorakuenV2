@@ -23,6 +23,7 @@ const TRANSITIONS: Record<string, Record<number, number[]>> = {
   outgoing_quote: {
     [OUTGOING_QUOTE_STATUS.draft]: [OUTGOING_QUOTE_STATUS.sent],
     [OUTGOING_QUOTE_STATUS.sent]: [
+      OUTGOING_QUOTE_STATUS.draft, // undo — always allowed for quotes (no SUNAT)
       OUTGOING_QUOTE_STATUS.approved,
       OUTGOING_QUOTE_STATUS.rejected,
       OUTGOING_QUOTE_STATUS.expired,

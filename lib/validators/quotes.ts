@@ -3,12 +3,13 @@ import {
   INCOMING_QUOTE_STATUS,
   success,
   failure,
-  withinTolerance,
 } from "@/lib/types";
 import type {
   ValidationResult,
   CreateOutgoingQuoteInput,
+  UpdateOutgoingQuoteInput,
   CreateIncomingQuoteInput,
+  OutgoingQuoteRow,
 } from "@/lib/types";
 import {
   validateCurrencyExchangeRate,
@@ -21,6 +22,13 @@ import {
 
 /**
  * Validate data for creating an outgoing quote.
+ *
+ * Note: outgoing_quotes has no exchange_rate column — quotes are
+ * pre-contract documents in whatever currency the client asked for,
+ * and the PEN equivalent is only computed at invoice time (when the
+ * exchange rate for the issue date is auto-filled from exchange_rates).
+ * So this validator only checks that currency is PEN or USD; it does
+ * not require exchange_rate.
  */
 export function validateOutgoingQuote(
   data: CreateOutgoingQuoteInput,
@@ -39,13 +47,63 @@ export function validateOutgoingQuote(
     fields.issue_date = "Required";
   }
 
-  Object.assign(fields, validateCurrencyExchangeRate(data.currency, null));
+  const currency = data.currency ?? "PEN";
+  if (currency !== "PEN" && currency !== "USD") {
+    fields.currency = "Must be PEN or USD";
+  }
 
   if (Object.keys(fields).length > 0) {
     return failure("VALIDATION_ERROR", "Outgoing quote validation failed", fields);
   }
 
   return success(data);
+}
+
+/**
+ * Validate an outgoing quote header update. Only a handful of fields are
+ * editable and only while the quote is in draft.
+ */
+export function validateUpdateOutgoingQuote(
+  data: UpdateOutgoingQuoteInput,
+): ValidationResult<UpdateOutgoingQuoteInput> {
+  const fields: Record<string, string> = {};
+
+  if ("currency" in data) {
+    const cur = data.currency ?? "PEN";
+    if (cur !== "PEN" && cur !== "USD") {
+      fields.currency = "Must be PEN or USD";
+    }
+  }
+
+  if (Object.keys(fields).length > 0) {
+    return failure("VALIDATION_ERROR", "Outgoing quote update validation failed", fields);
+  }
+
+  return success(data);
+}
+
+/**
+ * Assert that an outgoing quote is in a state that allows header mutation.
+ * Line item mutations use assertQuoteLineItemsMutable (draft only). Header
+ * fields follow the same rule — after the quote leaves draft, the contract
+ * basis is frozen.
+ */
+export function assertOutgoingQuoteHeaderMutable(
+  quote: Pick<OutgoingQuoteRow, "status" | "deleted_at">,
+): ValidationResult<void> {
+  if (quote.deleted_at) {
+    return failure("NOT_FOUND", "Outgoing quote has been deleted");
+  }
+  if (quote.status !== OUTGOING_QUOTE_STATUS.draft) {
+    return failure(
+      "CONFLICT",
+      "No se puede modificar una cotización que no está en borrador",
+      {
+        status: `Outgoing quote must be in draft (${OUTGOING_QUOTE_STATUS.draft}) to edit. Current: ${quote.status}`,
+      },
+    );
+  }
+  return success(undefined);
 }
 
 // ---------------------------------------------------------------------------
