@@ -461,12 +461,18 @@ describe("project lifecycle transitions", () => {
   });
 
   describe("getValidTransitions", () => {
-    it("returns [active] from prospect", () => {
-      expect(getValidTransitions("project", PROJECT_STATUS.prospect)).toEqual([PROJECT_STATUS.active]);
+    it("returns [active, rejected] from prospect", () => {
+      expect(getValidTransitions("project", PROJECT_STATUS.prospect)).toEqual([
+        PROJECT_STATUS.active,
+        PROJECT_STATUS.rejected,
+      ]);
     });
 
-    it("returns [completed] from active", () => {
-      expect(getValidTransitions("project", PROJECT_STATUS.active)).toEqual([PROJECT_STATUS.completed]);
+    it("returns [completed, rejected] from active", () => {
+      expect(getValidTransitions("project", PROJECT_STATUS.active)).toEqual([
+        PROJECT_STATUS.completed,
+        PROJECT_STATUS.rejected,
+      ]);
     });
 
     it("returns [archived] from completed", () => {
@@ -475,6 +481,10 @@ describe("project lifecycle transitions", () => {
 
     it("returns [] from archived", () => {
       expect(getValidTransitions("project", PROJECT_STATUS.archived)).toEqual([]);
+    });
+
+    it("returns [] from rejected", () => {
+      expect(getValidTransitions("project", PROJECT_STATUS.rejected)).toEqual([]);
     });
   });
 });

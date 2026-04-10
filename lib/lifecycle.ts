@@ -3,7 +3,7 @@ import {
   OUTGOING_QUOTE_STATUS,
   OUTGOING_INVOICE_STATUS,
   INCOMING_QUOTE_STATUS,
-  INCOMING_INVOICE_STATUS,
+  INCOMING_INVOICE_FACTURA_STATUS,
   SUBMISSION_STATUS,
   failure,
   success,
@@ -16,8 +16,8 @@ import type { ValidationResult } from "@/lib/types";
 
 const TRANSITIONS: Record<string, Record<number, number[]>> = {
   project: {
-    [PROJECT_STATUS.prospect]: [PROJECT_STATUS.active],
-    [PROJECT_STATUS.active]: [PROJECT_STATUS.completed],
+    [PROJECT_STATUS.prospect]: [PROJECT_STATUS.active, PROJECT_STATUS.rejected],
+    [PROJECT_STATUS.active]: [PROJECT_STATUS.completed, PROJECT_STATUS.rejected],
     [PROJECT_STATUS.completed]: [PROJECT_STATUS.archived],
   },
   outgoing_quote: {
@@ -47,13 +47,8 @@ const TRANSITIONS: Record<string, Record<number, number[]>> = {
     ],
   },
   incoming_invoice: {
-    [INCOMING_INVOICE_STATUS.unmatched]: [
-      INCOMING_INVOICE_STATUS.partially_matched,
-      INCOMING_INVOICE_STATUS.matched,
-    ],
-    [INCOMING_INVOICE_STATUS.partially_matched]: [
-      INCOMING_INVOICE_STATUS.unmatched,
-      INCOMING_INVOICE_STATUS.matched,
+    [INCOMING_INVOICE_FACTURA_STATUS.expected]: [
+      INCOMING_INVOICE_FACTURA_STATUS.received,
     ],
   },
   submission: {
@@ -74,6 +69,7 @@ const STATUS_LABELS: Record<string, Record<number, string>> = {
     [PROJECT_STATUS.active]: "active",
     [PROJECT_STATUS.completed]: "completed",
     [PROJECT_STATUS.archived]: "archived",
+    [PROJECT_STATUS.rejected]: "rejected",
   },
   outgoing_quote: {
     [OUTGOING_QUOTE_STATUS.draft]: "draft",
@@ -95,9 +91,8 @@ const STATUS_LABELS: Record<string, Record<number, string>> = {
     [INCOMING_QUOTE_STATUS.cancelled]: "cancelled",
   },
   incoming_invoice: {
-    [INCOMING_INVOICE_STATUS.unmatched]: "unmatched",
-    [INCOMING_INVOICE_STATUS.partially_matched]: "partially_matched",
-    [INCOMING_INVOICE_STATUS.matched]: "matched",
+    [INCOMING_INVOICE_FACTURA_STATUS.expected]: "expected",
+    [INCOMING_INVOICE_FACTURA_STATUS.received]: "received",
   },
   submission: {
     [SUBMISSION_STATUS.pending]: "pending",

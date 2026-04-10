@@ -23,6 +23,7 @@ export const PROJECT_STATUS = {
   active: 2,
   completed: 3,
   archived: 4,
+  rejected: 5,
 } as const;
 
 export const OUTGOING_QUOTE_STATUS = {
@@ -47,10 +48,9 @@ export const INCOMING_QUOTE_STATUS = {
   cancelled: 3,
 } as const;
 
-export const INCOMING_INVOICE_STATUS = {
-  unmatched: 1,
-  partially_matched: 2,
-  matched: 3,
+export const INCOMING_INVOICE_FACTURA_STATUS = {
+  expected: 1,
+  received: 2,
 } as const;
 
 export const SUBMISSION_STATUS = {
@@ -339,7 +339,7 @@ export type IncomingInvoiceRow = {
   contact_id: string;
   incoming_quote_id: string | null;
   cost_category_id: string | null;
-  status: number;
+  factura_status: number;
   factura_number: string | null;
   currency: string;
   exchange_rate: number | null;
@@ -621,4 +621,27 @@ export type SunatFieldsInput = {
   ruc_receptor?: string | null;
   hash_cdr?: string | null;
   estado_sunat?: string | null;
+};
+
+export type ProjectBudgetRow = {
+  id: string;
+  project_id: string;
+  cost_category_id: string;
+  budgeted_amount_pen: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+};
+
+export type CreateProjectBudgetInput = {
+  project_id: string;
+  cost_category_id: string;
+  budgeted_amount_pen: number;
+  notes?: string | null;
+};
+
+export type UpdateProjectBudgetInput = {
+  budgeted_amount_pen?: number;
+  notes?: string | null;
 };

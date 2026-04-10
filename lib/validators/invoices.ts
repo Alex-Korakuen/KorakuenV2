@@ -2,7 +2,7 @@ import {
   OUTGOING_INVOICE_STATUS,
   OUTGOING_QUOTE_STATUS,
   INCOMING_QUOTE_STATUS,
-  INCOMING_INVOICE_STATUS,
+  INCOMING_INVOICE_FACTURA_STATUS,
   withinTolerance,
   success,
   failure,
@@ -262,10 +262,7 @@ const MUTABLE_STATUSES: Record<DocumentType, number[]> = {
   outgoing_invoice: [OUTGOING_INVOICE_STATUS.draft],
   outgoing_quote: [OUTGOING_QUOTE_STATUS.draft],
   incoming_quote: [INCOMING_QUOTE_STATUS.draft],
-  incoming_invoice: [
-    INCOMING_INVOICE_STATUS.unmatched,
-    INCOMING_INVOICE_STATUS.partially_matched,
-  ],
+  incoming_invoice: [INCOMING_INVOICE_FACTURA_STATUS.expected],
 };
 
 /**
