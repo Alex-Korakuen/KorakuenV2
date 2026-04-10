@@ -249,28 +249,122 @@ export function validateProfitSplits(partners: ProjectPartner[]) {
 
 ---
 
-### Step 6.5 — Project Budgets
+### Step 6.5 — Schema Delta + Project Budgets
+
+> Result of the April 2026 north-star alignment audit. A single coordinated
+> pass that lands the decided schema changes, updates the TypeScript and
+> lifecycle layers to match, cleans up validator debt from earlier steps,
+> and ships the `project_budgets` feature that those changes enable. Four
+> sub-commits, tightly ordered — the TypeScript layer cannot compile against
+> the old schema, so 6.5a and 6.5b must land in sequence, and the validators
+> in 6.5c depend on both. Running the steps out of order creates a "broken
+> middle" state where types disagree with the database.
+>
+> This step unblocks Step 9 (Cost Documents, uses the new `factura_status`),
+> Step 10 (Payments, payment lines link to `incoming_invoices`), and the
+> project summary endpoint in Step 12 (needs `project_budgets` rows to
+> derive estimated cost and margin).
+
+**Prerequisite check:** Verify `incoming_invoices` is empty in prod before
+running 6.5a. If any rows exist, the migration must map old values safely:
+`unmatched | partially_matched | matched → factura_status = 2 (received)`
+(all old rows had a factura).
+
+#### 6.5a — Schema migration
+
+Single new migration file under `supabase/migrations/`. All changes are
+additive or rename operations — no destructive changes.
+
+- `cost_categories`: add `parent_id uuid REFERENCES cost_categories(id)`
+  nullable; drop `UNIQUE (name)` and replace with `UNIQUE (parent_id, name)`
+  so uniqueness is scoped to a branch
+- `projects`: add `5 = rejected` to the status enum (app-level; the smallint
+  column already accepts the value, so this is a CHECK constraint update)
+- `incoming_invoice_line_items`: add `cost_category_id uuid REFERENCES cost_categories(id)`, nullable
+- `incoming_invoices`:
+  - Rename column `status` → `factura_status`
+  - New two-value enum: `1 = expected, 2 = received`
+  - Make nullable: `serie_numero`, `fecha_emision`, `tipo_documento_code`,
+    `ruc_emisor`, `ruc_receptor`, `hash_cdr`, `estado_sunat`, `pdf_url`,
+    `xml_url`, `drive_file_id`, `factura_number`
+  - Add constraint `ii_received_requires_sunat`: when `factura_status = 2`,
+    all of `serie_numero`, `fecha_emision`, `tipo_documento_code`,
+    `ruc_emisor`, `ruc_receptor` must be NOT NULL
+- New table `project_budgets`:
+  `id, project_id, cost_category_id, budgeted_amount_pen, notes,
+  created_at, updated_at, deleted_at`. Unique `(project_id, cost_category_id)`.
+  Check `budgeted_amount_pen >= 0`. Full definition in `schema-reference.md`.
+- Activity log trigger attached to `project_budgets` so mutations are logged
+- New SQL helper function `get_incoming_invoice_payment_progress(invoice_id)`
+  returning `{total_pen, paid, outstanding, payment_state}`, used by server
+  actions to avoid reimplementing the math per query
+
+**Commit:** `feat: schema — factura_status, project_budgets, cost_categories hierarchy, rejected status`
+
+#### 6.5b — TypeScript types and lifecycle
+
+- `lib/types.ts`:
+  - Replace `INCOMING_INVOICE_STATUS` with `INCOMING_INVOICE_FACTURA_STATUS`
+    (`expected = 1, received = 2`); update all imports
+  - Add `rejected = 5` to `PROJECT_STATUS`
+  - Update any shape types that include the old incoming invoice status
+- `lib/lifecycle.ts`:
+  - Remove old `incoming_invoice` transitions
+    (`unmatched → partially_matched → matched`)
+  - Add `incoming_invoice.factura_status` transition: `expected → received`
+    (one-way). On transition to `received`, the validator in 6.5c will
+    enforce the SUNAT field presence rule — the lifecycle rule itself
+    just gates which transitions are legal.
+  - Add `project.status` transitions: `prospect → rejected`, `active → rejected`
+- Grep for any file importing the removed `INCOMING_INVOICE_STATUS` enum
+  and update each site. Expected: nothing yet (incoming invoices CRUD is
+  not built), but verify before committing.
+
+**Commit:** `feat: types — factura_status enum, rejected project status, lifecycle rules`
+
+#### 6.5c — Validators and validator-debt cleanup
+
+Three validator changes bundled so they land as one logical pass:
+
+- **New** `lib/validators/project-budgets.ts`:
+  - `validateCreateProjectBudget(data)` — amount ≥ 0; the referenced
+    `cost_category_id` must resolve to a row with `parent_id IS NULL`
+    (top-level only); no existing row for the same `(project_id,
+    cost_category_id)` pair
+  - `validateUpdateProjectBudget(data)` — same rules
+- **Update** `lib/validators/incoming-invoices.ts`:
+  - `validateFacturaStatusTransition(from, to, data)` — enforce
+    `expected → received` only; on `received`, require all SUNAT fields
+    present
+  - Remove any references to the old status vocabulary
+- **Retrofit of Step 6** — extract the inline validation currently at
+  `app/actions/project-partners.ts:54-60` into a new
+  `lib/validators/project-partners.ts` as `validateProjectPartnerInput(data)`,
+  and update the server action to call it. This is validator debt from
+  when Step 6 was built; we fix it while we're visiting the neighborhood,
+  not as a standalone cleanup pass later.
+
+**Commit:** `refactor: validators — project-budgets, incoming invoices, project-partners extraction`
+
+#### 6.5d — Project Budgets server actions
 
 Server actions in `app/actions/project-budgets.ts`:
 
-- `getProjectBudgets(projectId)` — list budget rows for a project with category names
-- `upsertProjectBudget(projectId, categoryId, amountPen, notes?)` — create or
-  update a single budget line (uses the unique `(project_id, cost_category_id)`
-  constraint to decide insert vs update)
+- `getProjectBudgets(projectId)` — list budget rows for a project with
+  category names joined in
+- `upsertProjectBudget(projectId, categoryId, amountPen, notes?)` — create
+  or update a single budget line (uses the `UNIQUE (project_id,
+  cost_category_id)` constraint to decide insert vs update)
 - `removeProjectBudget(projectId, categoryId)` — soft delete
-- `getEstimatedCost(projectId)` — returns the derived sum; used by the project
-  summary endpoint
+- `getEstimatedCost(projectId)` — returns the derived sum; used by the
+  project summary endpoint in Step 12
 
-Validation lives in `lib/validators/project-budgets.ts`:
-- `budgeted_amount_pen >= 0`
-- Referenced `cost_category_id` must have `parent_id IS NULL` (top-level only)
-- No duplicate `(project_id, cost_category_id)` pairs
+**No UI in Phase 1.** Logic and validators only. Budget entry and display
+are deferred until later in the UI build — the data foundation exists so
+the project summary endpoint can compute expected margin the moment a
+budget exists.
 
-**No UI in Phase 1.** Logic and validators only. Budget entry and display are
-deferred until later in the UI build — the data foundation exists so the
-project summary endpoint can compute expected margin the moment budgets exist.
-
-**Commit:** `feat: project_budgets — schema-backed estimated cost, logic only`
+**Commit:** `feat: project_budgets server actions`
 
 ---
 
@@ -350,6 +444,12 @@ Server actions for:
 ---
 
 ### Step 9 — Cost Documents
+
+> Prerequisite: Step 6.5 must be landed. The `factura_status` enum, the
+> `incoming_invoice.factura_status` lifecycle transition, and the
+> `validateFacturaStatusTransition` validator all come from Step 6.5; Step 9
+> is where the server actions and UI wire those pieces into the incoming
+> invoices CRUD.
 
 Server actions for:
 
