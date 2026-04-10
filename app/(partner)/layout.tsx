@@ -1,4 +1,5 @@
 import { requirePartner } from "@/lib/auth";
+import { ExchangeRateBanner } from "@/components/exchange-rate-banner";
 import { LogoutButton } from "@/components/logout-button";
 
 export default async function PartnerLayout({
@@ -22,6 +23,7 @@ export default async function PartnerLayout({
           <LogoutButton />
         </div>
       </header>
+      <ExchangeRateBanner variant="partner" />
       <main className="p-6">{children}</main>
     </div>
   );

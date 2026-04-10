@@ -65,6 +65,68 @@ export async function requireExchangeRate(
 }
 
 /**
+ * Check whether today's exchange rate is available.
+ *
+ * Used by the health endpoint and the dashboard banner.
+ * Compares against today in Lima timezone (the system operates on Peru time).
+ * Weekends are always ok — SUNAT does not publish on Saturday/Sunday.
+ */
+export async function checkExchangeRateHealth(): Promise<{
+  ok: boolean;
+  last_rate_date: string | null;
+  last_rate_promedio: number | null;
+  days_since_last_rate: number | null;
+  alert: string | null;
+}> {
+  const supabase = createServiceClient();
+  const today = new Date().toLocaleDateString("en-CA", {
+    timeZone: "America/Lima",
+  });
+  const dayOfWeek = new Date(today + "T12:00:00-05:00").getDay();
+  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
+  const { data, error } = await supabase
+    .from("exchange_rates")
+    .select("rate, rate_date")
+    .eq("base_currency", "USD")
+    .eq("target_currency", "PEN")
+    .eq("rate_type", "promedio")
+    .order("rate_date", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error || !data) {
+    return {
+      ok: isWeekend,
+      last_rate_date: null,
+      last_rate_promedio: null,
+      days_since_last_rate: null,
+      alert: isWeekend
+        ? null
+        : `No exchange rate for today (${today}). Transactions in USD cannot be converted. Enter the rate manually.`,
+    };
+  }
+
+  const rate = Number(data.rate);
+  const lastDate = data.rate_date as string;
+  const daysDiff = Math.floor(
+    (new Date(today).getTime() - new Date(lastDate).getTime()) /
+      (1000 * 60 * 60 * 24),
+  );
+  const rateOk = isWeekend || lastDate === today;
+
+  return {
+    ok: rateOk,
+    last_rate_date: lastDate,
+    last_rate_promedio: Number.isFinite(rate) ? rate : null,
+    days_since_last_rate: daysDiff,
+    alert: rateOk
+      ? null
+      : `No exchange rate for today (${today}). Transactions in USD cannot be converted. Enter the rate manually.`,
+  };
+}
+
+/**
  * Convert an amount to PEN using a given exchange rate.
  * Pure function — no database call.
  */

@@ -1,4 +1,5 @@
 import { requireAdmin } from "@/lib/auth";
+import { ExchangeRateBanner } from "@/components/exchange-rate-banner";
 import { LogoutButton } from "@/components/logout-button";
 
 export default async function AdminLayout({
@@ -20,6 +21,7 @@ export default async function AdminLayout({
           <LogoutButton />
         </div>
       </header>
+      <ExchangeRateBanner variant="admin" />
       <main className="p-6">{children}</main>
     </div>
   );

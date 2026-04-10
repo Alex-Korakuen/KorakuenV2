@@ -1,21 +1,26 @@
 """
 fetch_exchange_rates.py
 =======================
-Daily job that fetches the official USD/PEN exchange rate from SUNAT and
+Daily job that fetches the official USD/PEN exchange rate from BCRP and
 inserts it into the Korakuen exchange_rates table in Supabase.
 
 Source:
-  SUNAT — https://www.sunat.gob.pe/cl-at-ittipcam/tcS01Alias
-  Publishes the SBS closing rate of the previous business day.
-  No auth required. Official for SUNAT tax calculations.
+  BCRP — Banco Central de Reserva del Perú
+  https://estadisticas.bcrp.gob.pe/estadisticas/series/api
+  Series PD04639PD (compra) and PD04640PD (venta) — official SBS interbank
+  rates, the same series SUNAT publishes daily for tax purposes.
+  No auth required. No rate limits observed.
 
-No fallback. If the SUNAT endpoint fails, the job fails loudly and exits
-with a non-zero code. Render will log the failure. A missing rate for today
-is surfaced as an alert in the Korakuen dashboard via GET /system/health.
+Date convention:
+  BCRP labels each rate by the SBS closing date. SUNAT publishes that rate
+  on the *next* business day (e.g. SBS Apr 7 closing → SUNAT publishes Apr 8).
+  Korakuen stores rates by SUNAT publication date — the same date you would
+  use on a Peruvian tax document. The script handles the +1 business day
+  shift automatically.
 
 Run:
-  python fetch_exchange_rates.py                    # fetch today's rate
-  python fetch_exchange_rates.py --date 2026-03-15  # backfill a specific date
+  python fetch_exchange_rates.py                    # fetch today's published rate
+  python fetch_exchange_rates.py --date 2026-03-15  # fetch a specific publication date
   python fetch_exchange_rates.py --backfill-days 30 # backfill last 30 calendar days
   python fetch_exchange_rates.py --force            # re-fetch even if rate exists
 
@@ -35,7 +40,6 @@ import argparse
 import logging
 import os
 import sys
-import xml.etree.ElementTree as ET
 from datetime import date, timedelta
 
 import httpx
@@ -57,94 +61,134 @@ log = logging.getLogger(__name__)
 
 SUPABASE_DB_URL = os.environ["SUPABASE_DB_URL"]
 
-# SUNAT XML endpoint — SBS closing rate of the previous business day
-SUNAT_URL = "https://www.sunat.gob.pe/cl-at-ittipcam/tcS01Alias"
+# BCRP statistics API
+# PD04639PD = USD/PEN compra (SBS interbank buy)
+# PD04640PD = USD/PEN venta (SBS interbank sell)
+BCRP_BASE_URL = "https://estadisticas.bcrp.gob.pe/estadisticas/series/api"
+BCRP_SERIES = "PD04639PD-PD04640PD"
 
 REQUEST_TIMEOUT = 15  # seconds
 
 # Sanity bounds — PEN/USD should always be in this range.
-# If parsed values fall outside, the XML format has changed — fail loudly.
+# If parsed values fall outside, the response format has changed — fail loudly.
 RATE_MIN = 2.5
 RATE_MAX = 6.0
+
+# BCRP returns Spanish month abbreviations: Ene, Feb, Mar, Abr, May, Jun,
+# Jul, Ago, Set/Sep, Oct, Nov, Dic
+SPANISH_MONTHS = {
+    "Ene": 1, "Feb": 2, "Mar": 3, "Abr": 4, "May": 5, "Jun": 6,
+    "Jul": 7, "Ago": 8, "Set": 9, "Sep": 9, "Oct": 10, "Nov": 11, "Dic": 12,
+}
+
+# ---------------------------------------------------------------------------
+# Date helpers
+# ---------------------------------------------------------------------------
+
+
+def prev_business_day(d: date) -> date:
+    """Return the previous business day (Mon-Fri) strictly before d."""
+    prev = d - timedelta(days=1)
+    while prev.weekday() >= 5:
+        prev -= timedelta(days=1)
+    return prev
+
+
+def next_business_day(d: date) -> date:
+    """Return the next business day (Mon-Fri) strictly after d."""
+    nxt = d + timedelta(days=1)
+    while nxt.weekday() >= 5:
+        nxt += timedelta(days=1)
+    return nxt
+
+
+def parse_bcrp_date(name: str) -> date:
+    """Parse a BCRP date label like '08.Abr.26' into a date."""
+    parts = name.split(".")
+    if len(parts) != 3:
+        raise RuntimeError(f"Unexpected BCRP date format: {name!r}")
+    day_str, mon_str, year_str = parts
+    month = SPANISH_MONTHS.get(mon_str)
+    if month is None:
+        raise RuntimeError(f"Unknown Spanish month abbreviation: {mon_str!r}")
+    return date(2000 + int(year_str), month, int(day_str))
+
 
 # ---------------------------------------------------------------------------
 # Fetch
 # ---------------------------------------------------------------------------
 
 
-def fetch_from_sunat() -> tuple[float, float, str]:
+def fetch_from_bcrp(start: date, end: date) -> list[tuple[date, float, float]]:
     """
-    Fetch compra and venta rates from the SUNAT XML endpoint.
+    Fetch (sbs_date, compra, venta) tuples from the BCRP statistics API
+    for the SBS closing-date range [start, end] inclusive.
 
-    SUNAT returns the SBS closing rate for the previous business day.
-    The fecha in the response tells us which date the rates are for.
-
-    Returns (compra, venta, fecha_str) on success.
-    Raises RuntimeError on any failure — no silent fallback.
-
-    SUNAT XML shape:
-      <tcS01>
-        <tcS01-0100>
-          <tc_compra>3.745</tc_compra>
-          <tc_venta>3.748</tc_venta>
-          <tc_fecha>09/04/2026</tc_fecha>
-        </tcS01-0100>
-      </tcS01>
+    Returns rows in chronological order (skips weekends and holidays naturally).
+    Raises RuntimeError on transport, format, or sanity failures.
     """
-    log.info("Fetching exchange rate from SUNAT: %s", SUNAT_URL)
+    url = f"{BCRP_BASE_URL}/{BCRP_SERIES}/json/{start.isoformat()}/{end.isoformat()}"
+    log.info("Fetching exchange rates from BCRP: %s", url)
 
     try:
-        response = httpx.get(SUNAT_URL, timeout=REQUEST_TIMEOUT)
+        response = httpx.get(url, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
     except httpx.HTTPStatusError as e:
-        raise RuntimeError(f"SUNAT returned HTTP {e.response.status_code}") from e
+        raise RuntimeError(f"BCRP returned HTTP {e.response.status_code}") from e
     except httpx.RequestError as e:
-        raise RuntimeError(f"SUNAT request failed: {e}") from e
+        raise RuntimeError(f"BCRP request failed: {e}") from e
 
     try:
-        root = ET.fromstring(response.text)
-    except ET.ParseError as e:
-        raise RuntimeError(f"SUNAT response is not valid XML: {e}") from e
+        payload = response.json()
+    except ValueError as e:
+        raise RuntimeError(f"BCRP response is not valid JSON: {e}") from e
 
-    compra_el = root.find(".//tc_compra")
-    venta_el  = root.find(".//tc_venta")
-    fecha_el  = root.find(".//tc_fecha")
-
-    if compra_el is None or venta_el is None:
+    periods = payload.get("periods")
+    if not isinstance(periods, list):
         raise RuntimeError(
-            "SUNAT XML is missing <tc_compra> or <tc_venta>. "
-            "The endpoint format may have changed."
+            "BCRP response missing 'periods' array. Endpoint format may have changed."
         )
 
-    try:
-        compra = float(compra_el.text.strip())
-        venta  = float(venta_el.text.strip())
-    except (ValueError, AttributeError) as e:
-        raise RuntimeError(f"Could not parse rate values from SUNAT XML: {e}") from e
+    rows: list[tuple[date, float, float]] = []
+    for period in periods:
+        name = period.get("name")
+        values = period.get("values") or []
+        if not name or len(values) < 2:
+            log.warning("Skipping malformed BCRP period: %r", period)
+            continue
 
-    fecha_str = fecha_el.text.strip() if fecha_el is not None else "unknown"
+        try:
+            sbs_date = parse_bcrp_date(name)
+            compra = float(values[0])
+            venta = float(values[1])
+        except (ValueError, RuntimeError) as e:
+            log.warning("Skipping unparseable BCRP period %r: %s", period, e)
+            continue
 
-    # Sanity check — if these fail, something is very wrong with the data
-    if not (RATE_MIN <= compra <= RATE_MAX):
-        raise RuntimeError(
-            f"SUNAT compra rate {compra} is outside expected range "
-            f"[{RATE_MIN}, {RATE_MAX}]. Refusing to store."
-        )
-    if not (RATE_MIN <= venta <= RATE_MAX):
-        raise RuntimeError(
-            f"SUNAT venta rate {venta} is outside expected range "
-            f"[{RATE_MIN}, {RATE_MAX}]. Refusing to store."
-        )
-    if compra > venta:
-        raise RuntimeError(
-            f"SUNAT compra ({compra}) > venta ({venta}). This should never happen."
-        )
+        if not (RATE_MIN <= compra <= RATE_MAX):
+            raise RuntimeError(
+                f"BCRP compra rate {compra} on {sbs_date} is outside expected "
+                f"range [{RATE_MIN}, {RATE_MAX}]. Refusing to store."
+            )
+        if not (RATE_MIN <= venta <= RATE_MAX):
+            raise RuntimeError(
+                f"BCRP venta rate {venta} on {sbs_date} is outside expected "
+                f"range [{RATE_MIN}, {RATE_MAX}]. Refusing to store."
+            )
+        if compra > venta:
+            raise RuntimeError(
+                f"BCRP compra ({compra}) > venta ({venta}) on {sbs_date}. "
+                f"This should never happen."
+            )
 
+        rows.append((sbs_date, compra, venta))
+
+    rows.sort(key=lambda r: r[0])
     log.info(
-        "SUNAT OK — fecha: %s | compra: %.4f | venta: %.4f",
-        fecha_str, compra, venta,
+        "BCRP returned %d valid period(s) for SBS range %s..%s",
+        len(rows), start, end,
     )
-    return compra, venta, fecha_str
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -156,8 +200,8 @@ def get_connection():
     return psycopg2.connect(SUPABASE_DB_URL)
 
 
-def rate_already_exists(target_date: date) -> bool:
-    """Return True if we already have any rate row for this date."""
+def rate_already_exists(publication_date: date) -> bool:
+    """Return True if any USD/PEN row exists for this publication date."""
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -169,16 +213,17 @@ def rate_already_exists(target_date: date) -> bool:
                       AND rate_date       = %s
                 )
                 """,
-                (target_date,),
+                (publication_date,),
             )
             return cur.fetchone()[0]
 
 
-def upsert_rate(target_date: date, compra: float, venta: float) -> None:
+def upsert_rate(publication_date: date, compra: float, venta: float) -> None:
     """
-    Upsert three rows for target_date: compra, venta, promedio.
+    Upsert three rows for publication_date: compra, venta, promedio.
     ON CONFLICT DO UPDATE makes this safely re-runnable.
-    All three rows use source = 'sunat'.
+    Source is recorded as 'sunat' — BCRP republishes the same SBS rate
+    that SUNAT publishes for tax purposes.
     """
     promedio = round((compra + venta) / 2, 6)
 
@@ -204,12 +249,12 @@ def upsert_rate(target_date: date, compra: float, venta: float) -> None:
                         source     = EXCLUDED.source,
                         updated_at = now()
                     """,
-                    (rate_type, rate_value, target_date),
+                    (rate_type, rate_value, publication_date),
                 )
 
     log.info(
         "Stored rates for %s — compra: %.4f | venta: %.4f | promedio: %.4f",
-        target_date, compra, venta, promedio,
+        publication_date, compra, venta, promedio,
     )
 
 
@@ -218,26 +263,89 @@ def upsert_rate(target_date: date, compra: float, venta: float) -> None:
 # ---------------------------------------------------------------------------
 
 
-def process_date(target_date: date, force: bool = False) -> None:
+def process_publication_date(publication_date: date, force: bool = False) -> None:
     """
-    Fetch and store the rate for target_date.
-    Raises on any failure — caller decides how to handle.
-
-    Skips weekends: SBS does not publish on Saturday or Sunday.
-    The engine's fallback rule (most recent available rate) covers the gap.
+    Fetch the SBS rate that corresponds to the given SUNAT publication date
+    and store it. Skips weekends — SUNAT does not publish on Sat/Sun.
     """
-    if target_date.weekday() >= 5:  # 5=Sat, 6=Sun
-        log.info("Skipping %s — weekend (SBS does not publish).", target_date)
+    if publication_date.weekday() >= 5:
+        log.info("Skipping %s — weekend (SUNAT does not publish).", publication_date)
         return
 
-    if not force and rate_already_exists(target_date):
+    if not force and rate_already_exists(publication_date):
         log.info(
-            "Rate for %s already exists. Use --force to overwrite.", target_date
+            "Rate for %s already exists. Use --force to overwrite.", publication_date
         )
         return
 
-    compra, venta, _ = fetch_from_sunat()
-    upsert_rate(target_date, compra, venta)
+    sbs_date = prev_business_day(publication_date)
+    rows = fetch_from_bcrp(sbs_date, sbs_date)
+
+    if not rows:
+        raise RuntimeError(
+            f"BCRP returned no data for SBS date {sbs_date} "
+            f"(publication date {publication_date}). The rate may not be published yet."
+        )
+
+    _, compra, venta = rows[0]
+    upsert_rate(publication_date, compra, venta)
+
+
+def process_backfill(days: int, force: bool = False) -> int:
+    """
+    Backfill the last `days` calendar days of publication dates with a single
+    BCRP request. Returns the number of failures.
+    """
+    today = date.today()
+    earliest_publication = today - timedelta(days=days)
+
+    sbs_start = prev_business_day(earliest_publication)
+    sbs_end = prev_business_day(today + timedelta(days=1))
+
+    log.info(
+        "Backfilling publication dates %s..%s (BCRP SBS range %s..%s)",
+        earliest_publication, today, sbs_start, sbs_end,
+    )
+
+    try:
+        rows = fetch_from_bcrp(sbs_start, sbs_end)
+    except Exception as e:
+        log.error("BCRP request failed: %s", e)
+        return 1
+
+    if not rows:
+        log.warning("BCRP returned no rows for the requested range.")
+        return 0
+
+    upserted = 0
+    skipped = 0
+    failures = 0
+
+    for sbs_date, compra, venta in rows:
+        publication_date = next_business_day(sbs_date)
+        if publication_date > today:
+            log.info(
+                "Skipping %s — publication date in the future.", publication_date
+            )
+            continue
+        if publication_date < earliest_publication:
+            continue
+        if not force and rate_already_exists(publication_date):
+            log.info("Skipping %s — already exists.", publication_date)
+            skipped += 1
+            continue
+        try:
+            upsert_rate(publication_date, compra, venta)
+            upserted += 1
+        except Exception as e:
+            log.error("FAILED to upsert %s: %s", publication_date, e)
+            failures += 1
+
+    log.info(
+        "Backfill summary: upserted=%d, skipped=%d, failed=%d",
+        upserted, skipped, failures,
+    )
+    return failures
 
 
 # ---------------------------------------------------------------------------
@@ -247,12 +355,12 @@ def process_date(target_date: date, force: bool = False) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Fetch daily USD/PEN exchange rates from SUNAT into Supabase."
+        description="Fetch daily USD/PEN exchange rates from BCRP into Supabase."
     )
     parser.add_argument(
         "--date",
         type=str,
-        help="Specific date to fetch (YYYY-MM-DD). Defaults to today.",
+        help="Specific publication date to fetch (YYYY-MM-DD). Defaults to today.",
     )
     parser.add_argument(
         "--backfill-days",
@@ -268,38 +376,21 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.backfill_days:
-        today = date.today()
-        failures: list[tuple[date, str]] = []
-
-        log.info("Backfilling last %d calendar days...", args.backfill_days)
-        for i in range(args.backfill_days, -1, -1):
-            d = today - timedelta(days=i)
-            try:
-                process_date(d, force=args.force)
-            except Exception as e:
-                log.error("FAILED for %s: %s", d, e)
-                failures.append((d, str(e)))
-
+        failures = process_backfill(args.backfill_days, force=args.force)
         if failures:
             log.error(
-                "%d date(s) failed: %s",
-                len(failures),
-                ", ".join(str(d) for d, _ in failures),
-            )
-            log.error(
-                "Enter missing rates manually via the dashboard: "
-                "Settings → Tipos de Cambio → Registrar manualmente"
+                "%d row(s) failed to upsert. Enter missing rates manually via "
+                "the dashboard: Settings → Tipos de Cambio → Registrar manualmente",
+                failures,
             )
             sys.exit(1)
-
         log.info("Backfill complete.")
-
     else:
         target_date = (
             date.fromisoformat(args.date) if args.date else date.today()
         )
         try:
-            process_date(target_date, force=args.force)
+            process_publication_date(target_date, force=args.force)
         except Exception as e:
             log.error("FAILED: %s", e)
             log.error(
