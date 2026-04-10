@@ -641,6 +641,45 @@ export type CreateIncomingQuoteInput = {
   detraction_rate?: number | null;
   detraction_amount?: number | null;
   notes?: string | null;
+  line_items?: LineItemInput[];
+};
+
+export type UpdateIncomingQuoteInput = {
+  project_id?: string | null;
+  contact_id?: string;
+  description?: string;
+  reference?: string | null;
+  currency?: string;
+  exchange_rate?: number | null;
+  detraction_rate?: number | null;
+  detraction_amount?: number | null;
+  notes?: string | null;
+  pdf_url?: string | null;
+  drive_file_id?: string | null;
+};
+
+export type IncomingQuoteLineItemRow = {
+  id: string;
+  incoming_quote_id: string;
+  sort_order: number;
+  description: string;
+  unit: string | null;
+  quantity: number;
+  unit_price: number;
+  subtotal: number;
+  igv_applies: boolean;
+  igv_amount: number;
+  total: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// Line items on incoming invoices carry an optional per-line cost category
+// so a single factura can be split across categories (e.g. half materials,
+// half transport) without creating multiple invoices.
+export type IncomingInvoiceLineItemInput = LineItemInput & {
+  cost_category_id?: string | null;
 };
 
 export type CreateIncomingInvoiceInput = {
@@ -648,13 +687,18 @@ export type CreateIncomingInvoiceInput = {
   contact_id: string;
   incoming_quote_id?: string | null;
   cost_category_id?: string | null;
+  // 1 = expected (default), 2 = received. Received requires all SUNAT
+  // identifier fields to be present — validated in validateIncomingInvoice.
+  factura_status?: number;
   factura_number?: string | null;
   currency?: string;
   exchange_rate?: number | null;
   subtotal: number;
   igv_amount: number;
   total: number;
-  total_pen: number;
+  // Optional — server computes `total × exchange_rate` when omitted on USD
+  // invoices, or copies `total` when currency is PEN.
+  total_pen?: number;
   detraction_rate?: number | null;
   detraction_amount?: number | null;
   detraction_handled_by?: number | null;
@@ -664,6 +708,63 @@ export type CreateIncomingInvoiceInput = {
   ruc_emisor?: string | null;
   ruc_receptor?: string | null;
   notes?: string | null;
+  line_items?: IncomingInvoiceLineItemInput[];
+};
+
+export type UpdateIncomingInvoiceInput = {
+  // Financial core (locked once factura_status = received)
+  project_id?: string | null;
+  contact_id?: string;
+  currency?: string;
+  exchange_rate?: number | null;
+  subtotal?: number;
+  igv_amount?: number;
+  total?: number;
+  total_pen?: number;
+  detraction_rate?: number | null;
+  detraction_amount?: number | null;
+  // SUNAT identifier fields (locked once received)
+  factura_number?: string | null;
+  serie_numero?: string | null;
+  fecha_emision?: string | null;
+  tipo_documento_code?: string | null;
+  ruc_emisor?: string | null;
+  ruc_receptor?: string | null;
+  // SUNAT metadata — always mutable while not deleted
+  hash_cdr?: string | null;
+  estado_sunat?: string | null;
+  pdf_url?: string | null;
+  xml_url?: string | null;
+  drive_file_id?: string | null;
+  // Detracción proof fields — always mutable
+  detraction_handled_by?: number | null;
+  detraction_constancia_code?: string | null;
+  detraction_constancia_fecha?: string | null;
+  detraction_constancia_url?: string | null;
+  detraction_constancia_xml_url?: string | null;
+  // Categorization and quote link — always mutable (quote link can be
+  // backfilled after the fact)
+  incoming_quote_id?: string | null;
+  cost_category_id?: string | null;
+  notes?: string | null;
+};
+
+export type IncomingInvoiceLineItemRow = {
+  id: string;
+  incoming_invoice_id: string;
+  sort_order: number;
+  description: string;
+  unit: string | null;
+  quantity: number;
+  unit_price: number;
+  subtotal: number;
+  igv_applies: boolean;
+  igv_amount: number;
+  total: number;
+  cost_category_id: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type CreatePaymentInput = {

@@ -17,8 +17,10 @@ import type {
   CreateOutgoingInvoiceInput,
   UpdateOutgoingInvoiceInput,
   CreateIncomingInvoiceInput,
+  UpdateIncomingInvoiceInput,
   SunatFieldsInput,
   OutgoingInvoiceRow,
+  IncomingInvoiceRow,
 } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -345,6 +347,11 @@ export async function assertOutgoingInvoiceVoidable(
 
 /**
  * Validate data for creating an incoming invoice.
+ *
+ * When `factura_status = received` at creation time (the "manual received"
+ * creation path), all five SUNAT identifier fields must be present. This
+ * mirrors the DB CHECK constraint `ii_received_requires_sunat` so callers
+ * see a structured validator error instead of a Postgres 23514 failure.
  */
 export function validateIncomingInvoice(
   data: CreateIncomingInvoiceInput,
@@ -375,11 +382,161 @@ export function validateIncomingInvoice(
     fields.ruc_emisor = "Must be exactly 11 digits";
   }
 
+  // SUNAT field presence check for the manual-received creation path.
+  // The transition validator handles expected → received after the fact;
+  // this handles the case where factura_status is received from birth.
+  if (data.factura_status === INCOMING_INVOICE_FACTURA_STATUS.received) {
+    if (!data.serie_numero) {
+      fields.serie_numero = "Required when factura_status is received";
+    }
+    if (!data.fecha_emision) {
+      fields.fecha_emision = "Required when factura_status is received";
+    }
+    if (!data.tipo_documento_code) {
+      fields.tipo_documento_code = "Required when factura_status is received";
+    }
+    if (!data.ruc_emisor) {
+      fields.ruc_emisor = "Required when factura_status is received";
+    }
+    if (!data.ruc_receptor) {
+      fields.ruc_receptor = "Required when factura_status is received";
+    }
+  }
+
   if (Object.keys(fields).length > 0) {
     return failure("VALIDATION_ERROR", "Incoming invoice validation failed", fields);
   }
 
   return success(data);
+}
+
+/**
+ * Validate an incoming invoice header update, enforcing field-level locks
+ * based on the current factura_status.
+ *
+ * Expected:
+ *   - All fields mutable. The caller can edit the estimate freely until
+ *     the paper factura arrives.
+ *
+ * Received:
+ *   - Financial core is LOCKED: currency, exchange_rate, subtotal,
+ *     igv_amount, total, total_pen, detraction_rate, detraction_amount,
+ *     contact_id, project_id — these come from the SUNAT document and
+ *     must not be edited retroactively.
+ *   - SUNAT identifier fields are LOCKED: serie_numero, fecha_emision,
+ *     tipo_documento_code, ruc_emisor, ruc_receptor, factura_number.
+ *   - SUNAT metadata is MUTABLE: hash_cdr, estado_sunat, pdf_url, xml_url,
+ *     drive_file_id — these can be progressively filled as the billing
+ *     workflow finishes.
+ *   - Detracción proof fields are MUTABLE: the constancia comes later.
+ *   - Notes, incoming_quote_id, cost_category_id are MUTABLE: the
+ *     quote link can be backfilled and the category can be corrected.
+ */
+const II_LOCKED_ON_RECEIVED_FIELDS: (keyof UpdateIncomingInvoiceInput)[] = [
+  "project_id",
+  "contact_id",
+  "currency",
+  "exchange_rate",
+  "subtotal",
+  "igv_amount",
+  "total",
+  "total_pen",
+  "detraction_rate",
+  "detraction_amount",
+  "factura_number",
+  "serie_numero",
+  "fecha_emision",
+  "tipo_documento_code",
+  "ruc_emisor",
+  "ruc_receptor",
+];
+
+export function validateIncomingInvoiceHeaderUpdate(
+  invoice: Pick<IncomingInvoiceRow, "factura_status" | "deleted_at">,
+  patch: UpdateIncomingInvoiceInput,
+): ValidationResult<UpdateIncomingInvoiceInput> {
+  if (invoice.deleted_at) {
+    return failure("NOT_FOUND", "Incoming invoice has been deleted");
+  }
+
+  if (invoice.factura_status === INCOMING_INVOICE_FACTURA_STATUS.received) {
+    const lockedFieldErrors: Record<string, string> = {};
+    for (const field of II_LOCKED_ON_RECEIVED_FIELDS) {
+      if (field in patch) {
+        lockedFieldErrors[field as string] =
+          `Cannot modify ${String(field)} on a received incoming invoice. The SUNAT document is the source of truth.`;
+      }
+    }
+    if (Object.keys(lockedFieldErrors).length > 0) {
+      return failure(
+        "IMMUTABLE_FIELD",
+        "Los campos del documento SUNAT no se pueden modificar en una factura recibida",
+        lockedFieldErrors,
+      );
+    }
+  }
+
+  // Shape checks that apply in both states
+  if ("currency" in patch || "exchange_rate" in patch) {
+    const fields: Record<string, string> = {};
+    Object.assign(
+      fields,
+      validateCurrencyExchangeRate(patch.currency, patch.exchange_rate),
+    );
+    if (Object.keys(fields).length > 0) {
+      return failure("VALIDATION_ERROR", "Currency/exchange rate invalid", fields);
+    }
+  }
+
+  if ("detraction_rate" in patch && "detraction_amount" in patch) {
+    const fields: Record<string, string> = {};
+    Object.assign(
+      fields,
+      validateDetractionConsistency(patch.detraction_rate, patch.detraction_amount),
+    );
+    if (Object.keys(fields).length > 0) {
+      return failure("VALIDATION_ERROR", "Detracción fields inconsistent", fields);
+    }
+  }
+
+  if (patch.ruc_emisor != null && !/^\d{11}$/.test(patch.ruc_emisor)) {
+    return failure("VALIDATION_ERROR", "ruc_emisor must be 11 digits", {
+      ruc_emisor: "Must be exactly 11 digits",
+    });
+  }
+
+  if (patch.ruc_receptor != null && !/^\d{11}$/.test(patch.ruc_receptor)) {
+    return failure("VALIDATION_ERROR", "ruc_receptor must be 11 digits", {
+      ruc_receptor: "Must be exactly 11 digits",
+    });
+  }
+
+  return success(patch);
+}
+
+/**
+ * Assert that an incoming invoice can be soft-deleted. Delete is the
+ * "this was a mistake" escape hatch — only allowed while the row is
+ * still expected. Once received, the paper trail is permanent.
+ * The caller must also verify no payment_lines reference the invoice
+ * (that check lives in the server action because it needs a DB query).
+ */
+export function assertIncomingInvoiceDeletable(
+  invoice: Pick<IncomingInvoiceRow, "factura_status" | "deleted_at">,
+): ValidationResult<void> {
+  if (invoice.deleted_at) {
+    return failure("NOT_FOUND", "Incoming invoice is already deleted");
+  }
+  if (invoice.factura_status !== INCOMING_INVOICE_FACTURA_STATUS.expected) {
+    return failure(
+      "CONFLICT",
+      "Solo se pueden eliminar facturas en estado esperada. Las facturas recibidas quedan en el registro permanente.",
+      {
+        factura_status: `Incoming invoice must be expected (${INCOMING_INVOICE_FACTURA_STATUS.expected}) to delete. Current: ${invoice.factura_status}`,
+      },
+    );
+  }
+  return success(undefined);
 }
 
 // ---------------------------------------------------------------------------

@@ -9,7 +9,9 @@ import type {
   CreateOutgoingQuoteInput,
   UpdateOutgoingQuoteInput,
   CreateIncomingQuoteInput,
+  UpdateIncomingQuoteInput,
   OutgoingQuoteRow,
+  IncomingQuoteRow,
 } from "@/lib/types";
 import {
   validateCurrencyExchangeRate,
@@ -134,6 +136,63 @@ export function validateIncomingQuote(
   }
 
   return success(data);
+}
+
+/**
+ * Validate an incoming quote header update. Only editable while the quote
+ * is in draft — approved/cancelled quotes are frozen.
+ */
+export function validateUpdateIncomingQuote(
+  data: UpdateIncomingQuoteInput,
+): ValidationResult<UpdateIncomingQuoteInput> {
+  const fields: Record<string, string> = {};
+
+  if ("description" in data && !data.description?.trim()) {
+    fields.description = "Required";
+  }
+
+  if ("currency" in data || "exchange_rate" in data) {
+    Object.assign(
+      fields,
+      validateCurrencyExchangeRate(data.currency, data.exchange_rate),
+    );
+  }
+
+  if ("detraction_rate" in data || "detraction_amount" in data) {
+    Object.assign(
+      fields,
+      validateDetractionConsistency(data.detraction_rate, data.detraction_amount),
+    );
+  }
+
+  if (Object.keys(fields).length > 0) {
+    return failure("VALIDATION_ERROR", "Incoming quote update validation failed", fields);
+  }
+
+  return success(data);
+}
+
+/**
+ * Assert that an incoming quote is in a state that allows header mutation.
+ * Approved quotes are the contractual basis for an expected invoice and
+ * must stay frozen; cancelled quotes are tombstones.
+ */
+export function assertIncomingQuoteHeaderMutable(
+  quote: Pick<IncomingQuoteRow, "status" | "deleted_at">,
+): ValidationResult<void> {
+  if (quote.deleted_at) {
+    return failure("NOT_FOUND", "Incoming quote has been deleted");
+  }
+  if (quote.status !== INCOMING_QUOTE_STATUS.draft) {
+    return failure(
+      "CONFLICT",
+      "No se puede modificar una cotización que no está en borrador",
+      {
+        status: `Incoming quote must be in draft (${INCOMING_QUOTE_STATUS.draft}) to edit. Current: ${quote.status}`,
+      },
+    );
+  }
+  return success(undefined);
 }
 
 // ---------------------------------------------------------------------------
