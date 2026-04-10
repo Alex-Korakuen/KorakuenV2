@@ -95,6 +95,7 @@ Staging:         submissions
 
 | Task | Read First |
 |---|---|
+| Understanding the "why" — problems, wishes, scope | `docs/north-star.md` |
 | Any database work | `docs/schema-reference.md` |
 | Understanding business domain | `docs/domain-model.md` |
 | Understanding architecture / phases | `docs/architecture.md` |
