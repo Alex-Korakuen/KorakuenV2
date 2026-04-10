@@ -494,6 +494,17 @@ export type CreateProjectInput = {
 
 export type UpdateProjectInput = Partial<CreateProjectInput>;
 
+export type CreateProjectPartnerInput = {
+  contact_id: string;
+  company_label: string;
+  profit_split_pct: number;
+};
+
+export type UpdateProjectPartnerInput = {
+  company_label?: string;
+  profit_split_pct?: number;
+};
+
 export type LineItemInput = {
   sort_order?: number;
   description: string;
