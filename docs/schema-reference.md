@@ -380,6 +380,14 @@ conversion at budget-entry time with no upside.
 explicitly out of scope — the latter is a future feature (per-partida tracking),
 tracked in `north-star.md` under "What's explicitly NOT in scope."
 
+**Mutation rules.** Budgets are editable while a project is in `prospect` or
+`active` status — planning during prospect, mid-project corrections during
+active. Once a project reaches `completed`, `archived`, or `rejected`, budget
+rows become immutable. Changing a budget after the project is frozen would
+silently shift the historical "expected margin" figure the project summary
+endpoint derives, so the engine blocks all mutations with `409 CONFLICT` at
+those stages.
+
 **Total estimated cost for a project:**
 ```sql
 SELECT COALESCE(SUM(budgeted_amount_pen), 0) AS estimated_cost_pen
