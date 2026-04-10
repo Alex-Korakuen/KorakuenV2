@@ -450,7 +450,7 @@ export async function GET() {
 
 ---
 
-### Step 8 — Revenue Documents
+### Step 8 — Revenue Documents ✅
 
 Server actions for:
 
