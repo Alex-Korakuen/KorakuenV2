@@ -1,7 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { validateFacturaStatusTransition } from "../incoming-invoices";
+import {
+  validateIncomingInvoiceHeaderUpdate,
+  assertIncomingInvoiceDeletable,
+} from "../invoices";
 import { INCOMING_INVOICE_FACTURA_STATUS } from "../../types";
-import type { IncomingInvoiceRow } from "../../types";
+import type {
+  IncomingInvoiceRow,
+  UpdateIncomingInvoiceInput,
+} from "../../types";
 
 // ---------------------------------------------------------------------------
 // Helpers — minimal SUNAT state objects for testing
@@ -144,6 +151,172 @@ describe("validateFacturaStatusTransition", () => {
     if (!result.success) {
       expect(result.error.code).toBe("CONFLICT");
       expect(result.error.fields?.serie_numero).toBeUndefined();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateIncomingInvoiceHeaderUpdate
+// ---------------------------------------------------------------------------
+
+type InvoiceRowStub = Pick<IncomingInvoiceRow, "factura_status" | "deleted_at">;
+
+function makeInvoiceStub(
+  overrides?: Partial<InvoiceRowStub>,
+): InvoiceRowStub {
+  return {
+    factura_status: expected,
+    deleted_at: null,
+    ...overrides,
+  };
+}
+
+describe("validateIncomingInvoiceHeaderUpdate", () => {
+  it("accepts an empty patch on an expected invoice", () => {
+    const result = validateIncomingInvoiceHeaderUpdate(makeInvoiceStub(), {});
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts financial edits on an expected invoice", () => {
+    const patch: UpdateIncomingInvoiceInput = {
+      currency: "USD",
+      exchange_rate: 3.75,
+      subtotal: 100,
+      igv_amount: 18,
+      total: 118,
+    };
+    const result = validateIncomingInvoiceHeaderUpdate(
+      makeInvoiceStub(),
+      patch,
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts metadata edits on a received invoice", () => {
+    // hash_cdr, estado_sunat, pdf_url, xml_url, drive_file_id, and
+    // notes stay mutable after the invoice is received.
+    const patch: UpdateIncomingInvoiceInput = {
+      hash_cdr: "abc123",
+      estado_sunat: "accepted",
+      pdf_url: "https://drive.google.com/file/d/xyz",
+      notes: "Revisado con contador",
+    };
+    const result = validateIncomingInvoiceHeaderUpdate(
+      makeInvoiceStub({ factura_status: received }),
+      patch,
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts detracción proof fields on a received invoice", () => {
+    const patch: UpdateIncomingInvoiceInput = {
+      detraction_handled_by: 1,
+      detraction_constancia_code: "ABC123",
+      detraction_constancia_fecha: "2026-04-10",
+    };
+    const result = validateIncomingInvoiceHeaderUpdate(
+      makeInvoiceStub({ factura_status: received }),
+      patch,
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects financial-core edits on a received invoice", () => {
+    const patch: UpdateIncomingInvoiceInput = { total: 999 };
+    const result = validateIncomingInvoiceHeaderUpdate(
+      makeInvoiceStub({ factura_status: received }),
+      patch,
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe("IMMUTABLE_FIELD");
+      expect(result.error.fields?.total).toBeDefined();
+    }
+  });
+
+  it("rejects SUNAT identifier edits on a received invoice", () => {
+    const patch: UpdateIncomingInvoiceInput = {
+      serie_numero: "F002-00000001",
+      ruc_emisor: "20999999999",
+    };
+    const result = validateIncomingInvoiceHeaderUpdate(
+      makeInvoiceStub({ factura_status: received }),
+      patch,
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe("IMMUTABLE_FIELD");
+      expect(result.error.fields?.serie_numero).toBeDefined();
+      expect(result.error.fields?.ruc_emisor).toBeDefined();
+    }
+  });
+
+  it("rejects a patch on a soft-deleted invoice with NOT_FOUND", () => {
+    const result = validateIncomingInvoiceHeaderUpdate(
+      makeInvoiceStub({ deleted_at: "2026-04-10T00:00:00Z" }),
+      { notes: "test" },
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe("NOT_FOUND");
+    }
+  });
+
+  it("rejects malformed ruc_emisor in a patch", () => {
+    const patch: UpdateIncomingInvoiceInput = {
+      ruc_emisor: "12345",
+    };
+    const result = validateIncomingInvoiceHeaderUpdate(
+      makeInvoiceStub(),
+      patch,
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.fields?.ruc_emisor).toBeDefined();
+    }
+  });
+
+  it("rejects USD without exchange_rate in a patch", () => {
+    const patch: UpdateIncomingInvoiceInput = { currency: "USD" };
+    const result = validateIncomingInvoiceHeaderUpdate(
+      makeInvoiceStub(),
+      patch,
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.fields?.exchange_rate).toBeDefined();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// assertIncomingInvoiceDeletable
+// ---------------------------------------------------------------------------
+
+describe("assertIncomingInvoiceDeletable", () => {
+  it("accepts an expected, non-deleted invoice", () => {
+    const result = assertIncomingInvoiceDeletable(makeInvoiceStub());
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a received invoice with CONFLICT", () => {
+    const result = assertIncomingInvoiceDeletable(
+      makeInvoiceStub({ factura_status: received }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe("CONFLICT");
+      expect(result.error.fields?.factura_status).toBeDefined();
+    }
+  });
+
+  it("rejects an already-deleted invoice with NOT_FOUND", () => {
+    const result = assertIncomingInvoiceDeletable(
+      makeInvoiceStub({ deleted_at: "2026-04-10T00:00:00Z" }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe("NOT_FOUND");
     }
   });
 });
