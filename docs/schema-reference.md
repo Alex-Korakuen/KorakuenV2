@@ -1292,11 +1292,18 @@ These cannot be expressed as CHECK constraints and are enforced in application c
 14. **Submission promotion uniqueness:** A submission can only be approved once.
     Re-approving after `resulting_record_id` is set returns `409 CONFLICT`.
 
-15. **Invoice status auto-update:** When a payment line linking to an invoice is
-    created or deleted, the engine recalculates and updates the invoice status:
-    - `SUM(payment_lines.amount) = 0` → `unmatched / draft`
-    - `0 < SUM < total_pen` → `partially_paid / partially_matched`
-    - `SUM >= total_pen` → `paid / matched`
+15. **Outgoing invoice status auto-update:** When a payment line linking to an
+    outgoing invoice is created or deleted, the engine recalculates and updates
+    `outgoing_invoices.status`:
+    - `SUM(payment_lines.amount_pen) = 0` → remains at `sent`
+    - `0 < SUM < total_pen` → `partially_paid`
+    - `SUM >= total_pen` → `paid`
+
+    **Incoming invoices do NOT auto-update from payments.** Their `factura_status`
+    is independent of payment progress and only changes via an explicit
+    `expected → received` transition. Payment progress on an incoming invoice is
+    always derived at query time from the sum of linked payment lines and returned
+    under `_computed` — it is never stored.
 
 ---
 

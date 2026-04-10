@@ -71,15 +71,51 @@ known revenue target and a defined set of participating partner companies.
 **Lifecycle:**
 ```
 prospect → active → completed → [archived]
+       ↘         ↘
+       rejected  rejected
 ```
 
 - `prospect` — opportunity being pursued. A quote may exist. No contract yet.
 - `active` — contract signed. Invoicing has begun or will begin.
 - `completed` — all work done, all invoices issued, all payments received (or written off).
-- `archived` — completed project moved out of active views.
+- `archived` — completed project moved out of active views (tidy-up state).
+- `rejected` — terminal. For prospects that never converted (lost bids, dead leads)
+  or active projects that were cancelled. Distinct from `archived`: rejected means
+  the project did not succeed; archived means it succeeded and is closed out.
+
+Both `rejected` and `archived` are filtered out of the default project list.
 
 **One contract per project.** The relationship is always 1:1. If scope changes
 significantly enough to require a new contract, it is a new project.
+
+### Estimated Cost and Budgets
+
+A project's estimated cost is not stored as a column on `projects`. It is the sum
+of the project's `project_budgets` rows. Budgets are tagged with a top-level
+`cost_category_id` (Materiales, Mano de Obra, Alquiler de Equipos, etc.) and
+amounts are always in PEN — budgets are internal planning and the reporting
+currency is PEN. Purchases in USD convert to PEN at payment time and show up
+against the PEN budget naturally.
+
+```
+project_budgets
+  project_id            — which project
+  cost_category_id      — must be a top-level category (parent_id IS NULL)
+  budgeted_amount_pen   — always PEN
+```
+
+**Why top-level only:** Phase 1 operates the category hierarchy at its root level.
+Deeper levels (Item Group, Standard Reference Item) are seeded later from historical
+presupuestos and consumed by the future Price Sentinel. Per-partida budgeting —
+the full presupuesto model — is explicitly out of scope for Phase 1.
+
+**Margin computation (derived, not stored):**
+```
+estimated_cost   = SUM(budgeted_amount_pen) for project_budgets where project_id = P
+actual_cost      = SUM(total_amount_pen) for payments where project_id = P, direction=outbound
+expected_margin  = contract_value_pen − estimated_cost
+actual_margin    = contract_value_pen − actual_cost
+```
 
 ### Project Partners
 
@@ -233,7 +269,8 @@ vendor, project, and scope — even when the invoice is not yet in hand.
 
 **Optional:** Not every outbound payment has a prior incoming quote. A supplier payment
 on delivery may have no prior quote. In this case, the payment is recorded directly
-and matched to the incoming invoice when it arrives.
+and linked to the incoming invoice when it arrives (or to an `expected` invoice
+created at payment time, if the factura is still pending).
 
 **Lifecycle:** `draft → approved | cancelled`
 
@@ -249,33 +286,79 @@ detraction_rate, detraction_amount   — if applicable (when Korakuen detracts f
 
 ### Incoming Invoices (Facturas Recibidas)
 
-**What it is:** A SUNAT factura received from a vendor. In Korakuen's workflow, this
-almost always arrives AFTER the payment has already been made. The incoming invoice is
-registered when it physically arrives — it is matched to the incoming quote and to the
-payment(s) that already settled it.
+**What it is:** A row representing a vendor's bill — whether the paper factura
+is already in hand, known to be coming, or not yet announced. In Korakuen's
+workflow the paperwork and the money movement happen in any order, so this
+entity is designed to be created at whichever moment the obligation becomes
+real, not at the moment the SUNAT document arrives.
 
-**Key behavioral rule:** An incoming invoice does not trigger payment. Payment has
-already happened. The invoice is registered for accounting and SUNAT compliance purposes.
+**Key behavioral rule:** An incoming invoice does not trigger payment. Payment
+and paperwork are independent events in this system. The invoice exists for
+accounting, SUNAT compliance, and to give Korakuen a single record that ties
+together the vendor, the amount owed (or paid), and the factura when it eventually
+shows up.
 
-**Lifecycle:** `unmatched → partially_matched → matched`
+**Two independent dimensions:**
 
-Status is driven automatically by the engine based on payment lines:
-- `unmatched` — no payment lines reference this invoice yet
-- `partially_matched` — some payment lines allocated, but total < invoice amount
-- `matched` — payment line allocations fully cover the invoice amount
+1. **Factura state** — does the SUNAT paper physically exist? Stored in
+   `factura_status` as a simple two-value enum:
+   - `expected` — we know the obligation exists, but no factura is in hand. SUNAT
+     fields (`serie_numero`, `fecha_emision`, `ruc_emisor`, `hash_cdr`, etc.) are NULL.
+   - `received` — the factura has been registered. SUNAT fields are populated and
+     validated.
+2. **Payment progress** — how much has been paid against this invoice? **Never
+   stored.** Derived at query time from the sum of linked `payment_lines.amount_pen`,
+   and returned under `_computed` as one of `unpaid | partially_paid | paid`.
+
+A single row can be, for example, `(expected, paid)` — meaning Korakuen has
+already paid the vendor but the factura never arrived and needs chasing. Or
+`(received, unpaid)` — factura in hand, payment not yet made. These were
+previously impossible to model with a single status field.
+
+**Lifecycle:** `expected → received`. One-way transition. Enforced in
+`lib/lifecycle.ts`. The engine requires all SUNAT fields to be populated when
+transitioning to `received`.
+
+**The four real-world arrival flows:**
+
+1. **Quote-first** — Vendor sends a quote, Korakuen approves it, an expected
+   invoice is created from the quote (one-click), payment is made, factura
+   eventually arrives, expected → received. Most common flow.
+2. **Payment-first** — Payment is made directly (supplier on delivery, urgent
+   purchase). The payment form prompts "No factura yet — create an expected
+   invoice to track it?" An expected invoice is created and linked to the payment.
+   When the factura arrives later, it transitions to received.
+3. **Invoice-first** — Factura arrives before any payment (rare in Korakuen's
+   world, but possible). A received invoice is created directly with all SUNAT
+   fields filled in. Payment is allocated later.
+4. **Announcement-first** — Vendor says "I'll bill you next week" before anything
+   else happens. Alex opens the "New Incoming Invoice" form, toggles "Expected",
+   enters vendor + estimated amount + project. The obligation is now visible to
+   the system before any money or paper has moved.
+
+**Chase lists this enables** (all derived from the two-dimensional model):
+
+| List | Query |
+|---|---|
+| "Chase the factura" | expected AND paid > 0 |
+| "Pay the factura" | received AND outstanding > 0 |
+| "Coming soon" | expected AND paid = 0 |
+| "Fully closed" | received AND outstanding = 0 |
 
 **Key fields:**
 ```
 project_id            — nullable
 contact_id            — the vendor
 incoming_quote_id     — nullable (linked to prior incoming quote if one exists)
-factura_number        — the vendor's invoice number
+cost_category_id      — header-level categorization, nullable
+factura_status        — 1=expected, 2=received
+factura_number        — the vendor's invoice number (nullable while expected)
 
-subtotal, igv_amount, total
+subtotal, igv_amount, total  — best estimate while expected; authoritative once received
 currency, exchange_rate, total_pen
 detraction_rate, detraction_amount
 
--- SUNAT document fields (extracted from XML)
+-- SUNAT document fields — NULLABLE. Populated only when factura_status = received.
 serie_numero
 fecha_emision
 tipo_documento_code
@@ -428,36 +511,63 @@ is_active             — boolean
 9. Final invoice paid → Project status: completed
 ```
 
-### Cost flow (money out — normal case with incoming quote)
+### Cost flow — quote-first (money out with incoming quote)
 
 ```
 1. Vendor submits quote → Incoming quote created (status: draft)
 2. Incoming quote approved (status: approved)
-3. Payment made before invoice arrives:
+3. Expected invoice created from the approved quote (one-click):
+   Incoming invoice row inserted with factura_status = expected
+   SUNAT fields NULL. Vendor, project, amounts carried over from the quote.
+4. Payment made:
    a. Payment recorded: outbound, bank account
       paid_by_partner_id = which partner company's funds were used
-      Payment line: amount paid, no incoming_invoice_id yet (invoice not in hand)
+      Payment line: incoming_invoice_id = the expected invoice
    b. If detraction applies:
       Second payment: outbound, Banco de la Nación, is_detraction = true
-      Payment line: detraction amount
-4. Vendor sends factura → Incoming invoice registered (status: unmatched)
-   incoming_quote_id = matched quote
-5. Existing payment line(s) updated: incoming_invoice_id = this invoice
-6. Amounts validated: invoice total should match sum of payment lines
-   → status: matched (or partially_matched if discrepancy)
+      Payment line: detraction amount, same expected invoice
+5. Invoice is now (expected, paid) — shows up on the "chase the factura" list
+6. Vendor sends factura → existing row transitioned to factura_status = received
+   SUNAT fields populated. No new record created.
+7. Invoice is now (received, paid) — fully closed.
 ```
 
-### Cost flow (no prior quote — supplier on delivery)
+### Cost flow — payment-first (no prior quote, supplier on delivery)
 
 ```
 1. Supplier delivers materials, payment made on the spot
 2. Payment recorded immediately: outbound, bank account
    paid_by_partner_id = paying partner
-   Payment line: amount, no incoming_invoice_id (invoice not yet in hand)
-3. Supplier sends factura (same day or later)
-4. Incoming invoice registered
-5. Payment line updated: incoming_invoice_id = this invoice
-6. Status: matched
+3. Payment form prompts "No factura linked — create an expected invoice?"
+   Expected invoice created, pre-filled from the payment (vendor, amount, project)
+4. Payment line linked: incoming_invoice_id = the new expected invoice
+5. Invoice is now (expected, paid) — on the chase list
+6. Supplier sends factura later → transition to received, SUNAT fields populated
+7. Invoice is now (received, paid) — fully closed
+```
+
+### Cost flow — announcement-first (vendor pre-warns a bill)
+
+```
+1. Vendor says on WhatsApp "I'll bill you ~S/ 5,000 next week"
+2. Alex manually creates an expected invoice: New Incoming Invoice,
+   Expected toggle on, enters vendor + estimated amount + project
+3. Invoice is (expected, unpaid) — shows up on "coming soon" list
+4. Payment made at some later point → linked via payment line
+   Invoice becomes (expected, paid) or (expected, partially_paid)
+5. Factura arrives → transition to received
+6. Final state: (received, paid)
+```
+
+### Cost flow — invoice-first (rare: factura arrives before payment)
+
+```
+1. Vendor sends factura with no prior quote or payment
+2. New Incoming Invoice form used directly in "received" mode
+   SUNAT fields populated from the XML, factura_status = received
+3. Invoice is (received, unpaid) — shows up on "pay the factura" list
+4. Payment made later → linked via payment line
+5. Final state: (received, paid)
 ```
 
 ### Autodetracción (exceptional case)
@@ -519,13 +629,17 @@ This calculation is always derived — never stored. The engine exposes a
 The system can compute Korakuen's net IGV position at any time:
 
 ```
-igv_output = SUM(igv_amount on outgoing_invoices, approved)
-igv_input  = SUM(igv_amount on incoming_invoices, matched)
+igv_output = SUM(igv_amount on outgoing_invoices WHERE status IN (sent, partially_paid, paid))
+igv_input  = SUM(igv_amount on incoming_invoices WHERE factura_status = received)
 net_igv    = igv_output − igv_input
 ```
 
 Positive `net_igv` = Korakuen owes SUNAT this amount.
 Negative `net_igv` = SUNAT owes Korakuen a credit (crédito fiscal).
+
+**`expected` incoming invoices are excluded** — they have no valid SUNAT
+paperwork and cannot generate IGV credit. They become eligible for IGV input
+only when they transition to `received`.
 
 This is exposed via `GET /reports/igv-position?period_start=&period_end=`.
 

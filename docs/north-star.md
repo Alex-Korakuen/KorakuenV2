@@ -152,23 +152,30 @@ made every query, every form, and every report harder.
   from which bank accounts, with the bank's operation code
 
 **Incoming invoices** (vendors bill us):
-- Lifecycle: `expected -> unmatched -> partially_matched -> matched`
+- **Two independent dimensions.** Factura state (`factura_status = expected |
+  received`) tracks whether the paper SUNAT document exists. Payment progress
+  (`unpaid | partially_paid | paid`) is always derived from linked payment
+  lines — never stored. A single row can be any combination: `(expected,
+  paid)` = we paid but the factura never arrived and needs chasing;
+  `(received, unpaid)` = factura in hand, payment still to make; etc.
 - **`expected`** is for invoices we know are coming but don't have
   yet — a vendor told us "I'll bill you ~S/ 5,000 next week" and we
   want it on our radar before the paper arrives. An `expected` row
   has vendor, project, estimated amount + currency, and an optional
   expected arrival date and linked quote, but no SUNAT fields
-  (serie/numero/CDR) because no factura exists yet. It still shows
-  up in payables forecasts and the obligation calendar.
+  (serie/numero/CDR) because no factura exists yet.
 - When the real factura arrives, the same record transitions to
-  `unmatched` and the SUNAT fields get filled in. No record
-  duplication.
-- Often arrives AFTER we already paid — the system handles this
-  naturally by linking existing payments to the invoice when it
-  arrives. Combined with `expected`, this lets us record the four
-  real-world flows we see — payment-first, quote-first,
-  invoice-first, or any other order — without forcing a sequence.
-- Status auto-updates as payment lines are allocated
+  `received` and the SUNAT fields get filled in. Lifecycle is one-way
+  (`expected → received`). No record duplication.
+- **The four real-world arrival flows** this supports without forcing a
+  sequence: quote-first (approve quote → expected → pay → factura arrives →
+  received), payment-first (pay first → system prompts to create expected →
+  factura arrives → received), invoice-first (factura arrives before any
+  payment → received directly → pay later), and announcement-first (vendor
+  pre-warns a bill → manual expected → pay → factura → received).
+- **Chase lists** fall out naturally from the two-dimensional model:
+  "chase the factura" = expected + paid > 0; "pay the factura" = received +
+  unpaid; "coming soon" = expected + unpaid; "fully closed" = received + paid.
 
 **Audit trail:** Every mutation to every invoice is logged
 automatically with before/after state, who did it, and when. The
@@ -319,8 +326,9 @@ accounts. Retenciones reduce what clients actually pay us.
   time of the transaction is preserved forever.
 
 - **IGV position:** Output IGV (our outgoing invoices) minus
-  input IGV (matched incoming invoices) = net position. Positive
-  means we owe SUNAT; negative means credito fiscal.
+  input IGV (received incoming invoices — `expected` rows are
+  excluded since they have no valid SUNAT paperwork) = net
+  position. Positive means we owe SUNAT; negative means credito fiscal.
 
 - **Detracciones:** Properly modeled as part of the invoice
   total, not an addition. Client pays `total - detraccion` to our
@@ -501,25 +509,29 @@ These are real needs but belong elsewhere or in later phases:
 
 ## Schema gaps identified
 
-The following items from this north star are not yet reflected in the
-current database schema and will need discussion before
-implementation:
+> **Status (April 2026):** All items below have been discussed and decided.
+> Items 1, 2, 3, and 5 have final designs documented in `schema-reference.md`
+> and `domain-model.md`, and the execution checklist is tracked in `TODO.md`.
+> Item 4 remains a future-phase hook and is unchanged.
 
-1. **`estimated_cost` on `projects`** — The system tracks contract
-   value (revenue) but has no field for the internal cost estimate
-   we set. Adding a `numeric(15,2)` column would let the project
-   list show expected margin alongside actual spend.
+1. **Estimated cost on projects — DECIDED.** The system will not add an
+   `estimated_cost` column. Estimated cost is the sum of a project's
+   `project_budgets` rows (a new table added for this purpose), tagged by
+   top-level cost category, always in PEN. Keeps the "no stored totals"
+   rule intact. See `schema-reference.md` for the `project_budgets` schema.
 
-2. **Project status `rejected`** — Current statuses are `prospect ->
-   active -> completed -> archived`. A rejected/lost status (for
-   bids we didn't win or prospects that fell through) is needed.
+2. **Project status `rejected` — DECIDED.** Adding `5 = rejected` to the
+   `projects.status` enum. Terminal state for lost bids and cancelled
+   projects. Distinct from `archived` (which is for completed projects
+   moved out of active views). Both filtered out of the default list.
 
-3. **Cost category hierarchy** — `cost_categories` is currently
-   flat. The Price Sentinel future feature requires at minimum a
-   `parent_id` self-reference to support Category -> Item Group ->
-   Standard Reference Item. This could be added now at zero cost.
+3. **Cost category hierarchy — DECIDED.** Adding `parent_id uuid REFERENCES
+   cost_categories(id)` self-reference. Phase 1 operates at the top level
+   only; deeper levels are seeded later from historical presupuestos for
+   the Price Sentinel. The `project_budgets` validator enforces that
+   budgets may only reference top-level categories.
 
-4. **Item master / SKU tables** — Not needed in Phase 1, but the
+4. **Item master / SKU tables — UNCHANGED.** Not needed in Phase 1, but the
    Sentinel and Estimator will eventually require:
    - `items` (standard reference items with UOM)
    - `item_attributes` (type, brand, etc.)
@@ -529,18 +541,36 @@ implementation:
    as long as line items preserve structured `unit` and `unit_price`
    fields (which they already do).
 
-5. **`expected` status on incoming invoices** — Current incoming
-   invoice lifecycle starts at `unmatched`. We need a prior
-   `expected` state for invoices we know are coming but don't have
-   yet (vendor told us "I'll bill you next week"). Schema changes
-   required: add `expected` to the incoming invoice status enum, and
-   make SUNAT fields (`serie`, `numero`, CDR hash) nullable so an
-   `expected` row can exist without them. The lifecycle rules in
-   `lib/lifecycle.ts` must enforce that the SUNAT fields become
-   required on the transition to `unmatched`.
+5. **`expected` status on incoming invoices — DECIDED (redesigned).** The
+   incoming invoice status field is being restructured as a two-dimensional
+   model. Factura state (`factura_status = expected | received`) and payment
+   progress (always derived from payment lines) are now independent
+   dimensions. The confusing `unmatched | partially_matched | matched`
+   vocabulary is removed. SUNAT fields become nullable; a check constraint
+   enforces that `received` rows must have them populated. The lifecycle
+   rule in `lib/lifecycle.ts` enforces the `expected → received` transition
+   and the required SUNAT fields at that point. See `domain-model.md` for
+   the four arrival flows this enables and the three entry paths for
+   creating expected invoices.
 
-These require schema changes and need explicit approval per project
-rules.
+**Additional decision: retención — DEFERRED.** The glossary defines
+retención as a 3% withholding by designated retention-agent clients on
+outgoing invoices. It is not modeled in Phase 1 because Korakuen's current
+client mix rarely includes retention agents. Adding columns later is
+additive (no data migration). If a retention-agent client appears, the
+schema will be extended at that point.
+
+**Additional decision: obligation calendar — DEFERRED.** Originally listed
+in problem #8 as a chronological queue of payables, receivables, and loan
+schedule rows. Korakuen pays vendors upfront and does not extend credit
+to clients, so the real-world queue is usually empty. The `loan_schedule`
+table still exists for recording loan due dates, but no unified
+obligation calendar view or feature is planned for Phase 1. If the
+business introduces credit terms later, the feature can be built against
+the existing data.
+
+The pending changes from items 1, 2, 3, and 5 are tracked in `TODO.md` and
+will land in a single coordinated migration.
 
 ---
 

@@ -394,7 +394,11 @@ Server actions for:
 - `getEligiblePayments(invoiceId, invoiceType)` — filtered list of payments
   eligible to allocate to this invoice (same contact or no contact, unallocated balance > 0)
 
-**Payment line mutations auto-update invoice status** (unmatched → partially_matched → matched).
+**Outgoing invoice status auto-updates** from payment line mutations
+(`sent → partially_paid → paid`). **Incoming invoices do NOT auto-update** —
+their `factura_status` is independent of payment progress, and payment state
+is always derived at query time. See `api-design-principles.md` → "Formulas"
+for the canonical incoming invoice payment progress computation.
 
 **Commit:** `feat: payments CRUD, payment lines, eligible payment filter`
 
