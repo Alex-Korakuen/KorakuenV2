@@ -476,7 +476,7 @@ Server actions for:
 
 ---
 
-### Step 9 — Cost Documents
+### Step 9 — Cost Documents ✅
 
 > Prerequisite: Step 6.5 must be landed. The `factura_status` enum, the
 > `incoming_invoice.factura_status` lifecycle transition, and the
@@ -504,6 +504,59 @@ Server actions for:
 - SUNAT XML fields extracted and stored when transitioning to `received`
 
 **Commit:** `feat: cost documents — incoming quotes, incoming invoices with factura_status`
+
+---
+
+### Step 9.5 — Self Contact Flag
+
+> Small standalone pass. Landed after Step 9 so the cost-document CRUD is
+> already in place and the new flag can be verified end-to-end against
+> live invoice data.
+
+Korakuen itself is a business entity that already has a natural home in
+the `contacts` table alongside the other two partner companies — all three
+carry `is_partner = true`. What's missing is any way to pick out which of
+the three rows IS Korakuen. This step closes that gap so both the
+Next.js UI and any future FastAPI / AI agent caller can resolve "who is
+self" from a single canonical lookup, with no env vars or constants.
+
+#### 9.5a — Schema migration
+
+New migration `supabase/migrations/<ts>_self_contact_flag.sql`:
+
+- Add `is_self boolean NOT NULL DEFAULT false` to `contacts`
+- Add partial unique index enforcing only one self row:
+  `CREATE UNIQUE INDEX contacts_single_self ON contacts (is_self) WHERE is_self = true`
+- Seed: set `is_self = true` on Korakuen's existing contact row, or
+  insert it via the SUNAT lookup flow if it doesn't exist yet. Running
+  twice must be a no-op.
+
+**Commit:** `feat: schema — contacts.is_self flag, unique self row`
+
+#### 9.5b — Self lookup helper
+
+New file `lib/self.ts`:
+
+- `getSelfContact(supabase)` — single query
+  (`SELECT * FROM contacts WHERE is_self = true AND deleted_at IS NULL`),
+  returns the full row. Cached per-request via React `cache()` so
+  multiple callers in the same render don't hit the DB twice
+- `getSelfRuc(supabase)` — convenience wrapper returning just the RUC
+
+Validators in `lib/validators/contacts.ts` get one addition:
+`assertCannotUnsetSelf(before, patch)` — blocks `updateContact` from
+flipping `is_self` from true to false (the partial unique index already
+prevents two selves, but we also don't want zero selves).
+
+**Commit:** `feat: self contact helper, unset-self guard`
+
+#### 9.5c — Wire into existing forms (deferred)
+
+**No server action changes in this step.** The Next.js form components
+built in Step 13 will consume `getSelfContact` to pre-fill `ruc_receptor`
+on the outgoing-invoice form and `ruc_receptor` on the incoming-invoice
+"Mark as received" form. Until Step 13 exists there's no form to wire
+up — the helper and migration are enough to unblock it.
 
 ---
 
