@@ -65,6 +65,50 @@ export async function requireExchangeRate(
 }
 
 /**
+ * Strict exact-match lookup for a specific date. Unlike `requireExchangeRate`,
+ * this does NOT fall back to the most recent prior rate. Used by the outgoing
+ * invoice creation flow where Alex's rule is: if the rate for the exact issue
+ * date isn't in the table, block creation and make the admin register it
+ * manually via Settings → Tipos de Cambio. With the Step 7 weekend backfill
+ * in place, weekend dates are always present (duplicated from Friday), so
+ * this lookup only fails on genuine gaps that need human attention.
+ */
+export async function requireExactExchangeRate(
+  dateStr: string,
+  rateType: string = "promedio",
+): Promise<ValidationResult<ExchangeRateResult>> {
+  const supabase = createServiceClient();
+
+  const { data, error } = await supabase
+    .from("exchange_rates")
+    .select("rate, rate_date")
+    .eq("base_currency", "USD")
+    .eq("target_currency", "PEN")
+    .eq("rate_type", rateType)
+    .eq("rate_date", dateStr)
+    .maybeSingle();
+
+  if (error || !data) {
+    return failure(
+      "VALIDATION_ERROR",
+      `No hay tipo de cambio registrado para ${dateStr}. Registre el tipo de cambio en Ajustes → Tipos de Cambio antes de crear el documento.`,
+      { exchange_rate: `No exchange rate found for exact date ${dateStr}` },
+    );
+  }
+
+  const rate = Number(data.rate);
+  if (!Number.isFinite(rate) || rate <= 0) {
+    return failure(
+      "VALIDATION_ERROR",
+      `El tipo de cambio registrado para ${dateStr} no es válido.`,
+      { exchange_rate: `Invalid stored rate for ${dateStr}` },
+    );
+  }
+
+  return success({ rate, rate_date: data.rate_date as string });
+}
+
+/**
  * Check whether today's exchange rate is available.
  *
  * Used by the health endpoint and the dashboard banner.

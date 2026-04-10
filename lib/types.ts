@@ -581,6 +581,54 @@ export type CreateOutgoingInvoiceInput = {
   ruc_emisor?: string | null;
   ruc_receptor?: string | null;
   notes?: string | null;
+  line_items?: LineItemInput[];
+};
+
+export type UpdateOutgoingInvoiceInput = {
+  // Financial core (draft only)
+  period_start?: string;
+  period_end?: string;
+  issue_date?: string;
+  currency?: string;
+  exchange_rate?: number | null;
+  detraction_rate?: number | null;
+  detraction_amount?: number | null;
+  // SUNAT fields (always mutable while not void)
+  serie_numero?: string | null;
+  fecha_emision?: string | null;
+  tipo_documento_code?: string | null;
+  ruc_emisor?: string | null;
+  ruc_receptor?: string | null;
+  hash_cdr?: string | null;
+  estado_sunat?: string | null;
+  pdf_url?: string | null;
+  xml_url?: string | null;
+  drive_file_id?: string | null;
+  // Detracción proof fields (always mutable while not void)
+  detraction_status?: number;
+  detraction_handled_by?: number | null;
+  detraction_constancia_code?: string | null;
+  detraction_constancia_fecha?: string | null;
+  detraction_constancia_url?: string | null;
+  // Notes (always mutable while not void)
+  notes?: string | null;
+};
+
+export type OutgoingInvoiceLineItemRow = {
+  id: string;
+  outgoing_invoice_id: string;
+  sort_order: number;
+  description: string;
+  unit: string | null;
+  quantity: number;
+  unit_price: number;
+  subtotal: number;
+  igv_applies: boolean;
+  igv_amount: number;
+  total: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type CreateIncomingQuoteInput = {
