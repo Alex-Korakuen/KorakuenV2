@@ -295,7 +295,15 @@ export type FetchAndStoreResult = {
 
 /**
  * Fetch and store the SUNAT-published rate for the given publication date.
- * Skips weekends and existing rows unless `force` is true.
+ * Skips Saturdays and Sundays (BCRP doesn't publish on weekends).
+ *
+ * Weekend backfill: on Friday runs the fetched rate is additionally written
+ * to the following Saturday and Sunday rows. SUNAT's convention is to use
+ * Friday's rate for weekend-dated transactions, so we materialize those rows
+ * here instead of making every query special-case weekends.
+ *
+ * On Fridays the existing-row short-circuit is bypassed so weekend backfill
+ * runs even when the Friday row was already stored by an earlier invocation.
  */
 export async function fetchAndStorePublicationRate(
   publicationDate: Date,
@@ -315,7 +323,13 @@ export async function fetchAndStorePublicationRate(
     };
   }
 
-  if (!options.force && (await rateExistsForPublicationDate(publicationDate))) {
+  const isFriday = dow === 5;
+
+  if (
+    !options.force &&
+    !isFriday &&
+    (await rateExistsForPublicationDate(publicationDate))
+  ) {
     return {
       publication_date: dateStr,
       stored: false,
@@ -337,6 +351,16 @@ export async function fetchAndStorePublicationRate(
 
   const { compra, venta } = rows[0];
   await upsertExchangeRate(publicationDate, compra, venta);
+
+  if (isFriday) {
+    const saturday = new Date(publicationDate);
+    saturday.setUTCDate(saturday.getUTCDate() + 1);
+    const sunday = new Date(publicationDate);
+    sunday.setUTCDate(sunday.getUTCDate() + 2);
+    await upsertExchangeRate(saturday, compra, venta);
+    await upsertExchangeRate(sunday, compra, venta);
+  }
+
   const promedio = Math.round(((compra + venta) / 2) * 1_000_000) / 1_000_000;
 
   return {
