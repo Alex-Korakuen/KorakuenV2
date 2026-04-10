@@ -279,7 +279,7 @@ and the API principles surfaced four issues, fixed in a follow-up pass:
 
 ---
 
-### Step 6.5 — Schema Delta + Project Budgets
+### Step 6.5 — Schema Delta + Project Budgets ✅
 
 > Result of the April 2026 north-star alignment audit. A single coordinated
 > pass that lands the decided schema changes, updates the TypeScript and
