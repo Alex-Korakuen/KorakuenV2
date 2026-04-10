@@ -623,6 +623,17 @@ export type SunatFieldsInput = {
   estado_sunat?: string | null;
 };
 
+export type CostCategoryRow = {
+  id: string;
+  parent_id: string | null;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ProjectBudgetRow = {
   id: string;
   project_id: string;
