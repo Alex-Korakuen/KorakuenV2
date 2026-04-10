@@ -6,6 +6,14 @@
 >
 > Related: `domain-model.md` · `api-design-principles.md`
 
+> **⚠ Pending migration — target state documented here.** The following decisions
+> have been made but not yet applied to the database. See `TODO.md` for the
+> execution checklist. Until the migration lands, the live database does not
+> match this document for: `incoming_invoices.factura_status` (renamed from
+> `status`, new two-value enum), nullable SUNAT fields on `incoming_invoices`,
+> `cost_categories.parent_id`, `incoming_invoice_line_items.cost_category_id`,
+> `projects.status = 5 (rejected)`, and the new `project_budgets` table.
+
 ---
 
 ## Schema Conventions
@@ -41,14 +49,14 @@ These rules apply to all tables unless explicitly noted as an exception.
 | Field | Table | Mapping |
 |---|---|---|
 | `role` | `users` | 1=admin, 2=partner |
-| `status` | `projects` | 1=prospect, 2=active, 3=completed, 4=archived |
+| `status` | `projects` | 1=prospect, 2=active, 3=completed, 4=archived, 5=rejected |
 | `billing_frequency` | `projects` | 1=weekly, 2=biweekly, 3=monthly, 4=milestone |
 | `status` | `outgoing_quotes` | 1=draft, 2=sent, 3=approved, 4=rejected, 5=expired |
 | `status` | `outgoing_invoices` | 1=draft, 2=sent, 3=partially_paid, 4=paid, 5=void |
 | `detraction_status` | `outgoing_invoices` | 1=not_applicable, 2=pending, 3=received, 4=autodetracted |
 | `detraction_handled_by` | `outgoing_invoices` | 1=client_deposited, 2=not_applicable |
 | `status` | `incoming_quotes` | 1=draft, 2=approved, 3=cancelled |
-| `status` | `incoming_invoices` | 1=unmatched, 2=partially_matched, 3=matched |
+| `factura_status` | `incoming_invoices` | 1=expected, 2=received |
 | `detraction_handled_by` | `incoming_invoices` | 1=self, 2=vendor_handled, 3=not_applicable |
 | `direction` | `payments` | 1=inbound, 2=outbound |
 | `payment_line_type` | `payment_lines` | 1=invoice, 2=bank_fee, 3=detraction, 4=loan, 5=general |
@@ -87,8 +95,10 @@ users
 
 ### `exchange_rates`
 
-Append-only. Populated by `fetch_exchange_rates.py` daily cron job (SUNAT XML endpoint).
-Three rows per weekday: compra, venta, promedio. Never edited or deleted by clients.
+Append-only. Populated by the daily Vercel Cron job at
+`/api/cron/fetch-exchange-rates`, which fetches from the BCRP statistics API
+and stores three rows per weekday: compra, venta, promedio. Never edited or
+deleted by clients.
 
 ```sql
 exchange_rates
@@ -260,6 +270,14 @@ projects
 a contract is signed. The engine validates that all contract fields are populated
 before allowing the project to transition to `active`.
 
+**`rejected` status** — for prospects that never converted (lost bids, dead leads)
+or active projects that were cancelled. Terminal state. Separate from `archived`,
+which is for completed projects moved out of active views for tidiness. Both are
+filtered out of the default project list.
+
+**Estimated cost is not a column on this table.** A project's estimated cost is
+the sum of its `project_budgets` rows (see below). Totals are never stored.
+
 ### `project_partners`
 
 Which companies participate in each project and at what profit split.
@@ -305,16 +323,69 @@ Viáticos
 ```sql
 cost_categories
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid()
-  name        text NOT NULL UNIQUE
+  parent_id   uuid REFERENCES cost_categories(id)   -- NULL = top-level category
+  name        text NOT NULL
   description text
   is_active   boolean NOT NULL DEFAULT true
   sort_order  smallint NOT NULL DEFAULT 0
   created_at  timestamptz NOT NULL DEFAULT now()
   updated_at  timestamptz NOT NULL DEFAULT now()
+
+  UNIQUE (parent_id, name)                          -- unique within a parent branch
 ```
+
+**Hierarchy:** The `parent_id` self-reference supports a three-level taxonomy that
+will back the future Price Sentinel: Category (top, e.g. "Materiales") → Item
+Group (e.g. "Cemento") → Standard Reference Item (e.g. "Cemento Portland 42.5kg").
+Phase 1 operates at the top level only; the deeper levels are seeded later from
+historical presupuestos. The column exists now at zero cost to avoid a retroactive
+reclassification of thousands of records later.
+
+**Budgeting rule:** `project_budgets` rows may only reference top-level categories
+(rows where `parent_id IS NULL`). Enforced in `lib/validators/project-budgets.ts`,
+not as a DB constraint, so the rule can be relaxed later without a migration.
 
 Categories are never deleted — set `is_active = false` to retire one. This preserves
 historical records that reference it.
+
+### `project_budgets`
+
+Per-project cost budget, tagged by top-level cost category. The sum of a project's
+budget rows is the project's estimated cost. Never stored as a column on `projects`.
+
+```sql
+project_budgets
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid()
+  project_id            uuid NOT NULL REFERENCES projects(id)
+  cost_category_id      uuid NOT NULL REFERENCES cost_categories(id)
+  budgeted_amount_pen   numeric(15,2) NOT NULL     -- always PEN, the reporting currency
+  notes                 text
+  created_at            timestamptz NOT NULL DEFAULT now()
+  updated_at            timestamptz NOT NULL DEFAULT now()
+  deleted_at            timestamptz
+
+  UNIQUE (project_id, cost_category_id)
+
+  CONSTRAINT pb_positive
+    CHECK (budgeted_amount_pen >= 0)
+```
+
+**Always PEN.** Budgets are internal planning. Purchases in USD convert to PEN at
+payment time (using the exchange rate stamped on each payment) and show up against
+the PEN budget naturally. Making budgets multi-currency would mean re-doing the
+conversion at budget-entry time with no upside.
+
+**Top-level only.** Validator enforces that the referenced `cost_category_id` has
+`parent_id IS NULL`. Sub-category budgets and leaf-level (partida) budgets are
+explicitly out of scope — the latter is a future feature (per-partida tracking),
+tracked in `north-star.md` under "What's explicitly NOT in scope."
+
+**Total estimated cost for a project:**
+```sql
+SELECT COALESCE(SUM(budgeted_amount_pen), 0) AS estimated_cost_pen
+FROM project_budgets
+WHERE project_id = :project_id AND deleted_at IS NULL
+```
 
 ---
 
@@ -553,15 +624,41 @@ incoming_quote_line_items
 
 ### `incoming_invoices`
 
-Facturas received from vendors. Registered when the document physically arrives —
-almost always after payment has already been made.
+Facturas received from vendors — plus invoices we know are coming but don't have
+the paperwork for yet. In Korakuen's workflow the paper trail and the money movement
+happen in any order: sometimes the factura arrives first, sometimes the payment,
+sometimes the vendor just announces "I'll bill you next week." This table models
+all of them without record duplication.
 
-**Lifecycle:** `unmatched → partially_matched → matched`
+**Two independent dimensions:**
 
-Status is driven automatically by the engine based on `payment_lines`:
-- `SUM(allocated) = 0` → `unmatched`
-- `0 < SUM(allocated) < total_pen` → `partially_matched`
-- `SUM(allocated) >= total_pen` → `matched`
+1. **Factura state** — does the SUNAT paperwork physically exist?
+   - `factura_status = 1 (expected)` — we know the obligation exists (from a quote,
+     a payment already made, or a vendor's pre-announcement) but no factura is in hand.
+     SUNAT fields are NULL.
+   - `factura_status = 2 (received)` — the factura is registered. SUNAT fields populated.
+2. **Payment progress** — how much of this invoice has been paid? **Never stored.**
+   Derived at query time from the sum of `payment_lines.amount_pen` where
+   `incoming_invoice_id = this.id`. Returned under `_computed` in API responses
+   as `paid`, `outstanding`, and a convenience state (`unpaid | partially_paid | paid`).
+
+**Lifecycle:** `expected → received`. One-way transition. Enforced in
+`lib/lifecycle.ts`. When transitioning to `received`, the engine requires all SUNAT
+fields to be populated.
+
+**Three entry paths create an `expected` row:**
+1. **From an approved incoming quote** — one-click "Track as expected invoice." The
+   expected row carries over vendor, project, amount, and line items from the quote.
+2. **From a payment that has no factura linked** — payment form prompts "No factura
+   yet — create an expected invoice to track it?" Pre-fills vendor, amount, project.
+3. **Manually** — "New Incoming Invoice" form with an "Expected" toggle that hides
+   the SUNAT fields.
+
+**The four real-world flows this supports (from `north-star.md` problem #5):**
+- **Quote-first:** quote approved → expected invoice → payment → factura arrives → received
+- **Payment-first:** payment recorded → expected invoice auto-prompted → factura arrives → received
+- **Invoice-first:** factura arrives → received invoice created → payment later
+- **Announcement-first:** vendor says "bill coming" → expected invoice created manually → payment → factura → received
 
 ```sql
 incoming_invoices
@@ -569,13 +666,13 @@ incoming_invoices
   project_id          uuid REFERENCES projects(id)    -- nullable
   contact_id          uuid NOT NULL REFERENCES contacts(id)
   incoming_quote_id   uuid REFERENCES incoming_quotes(id)  -- nullable
-  cost_category_id    uuid REFERENCES cost_categories(id)  -- nullable, for filtering/reference
-  status              smallint NOT NULL DEFAULT 1
-  factura_number      text                            -- vendor's own invoice number
+  cost_category_id    uuid REFERENCES cost_categories(id)  -- header-level, nullable
+  factura_status      smallint NOT NULL DEFAULT 1     -- 1=expected, 2=received
+  factura_number      text                            -- vendor's own invoice number, nullable while expected
   currency            text NOT NULL DEFAULT 'PEN'
   exchange_rate       numeric(10,6)
-  -- For incoming invoices, totals may be entered directly from the SUNAT document
-  -- (header-only mode) OR derived from line items. Both modes valid.
+  -- Amounts: required always. For expected rows, these are the best estimate we have.
+  -- For received rows, these come from the SUNAT document.
   subtotal            numeric(15,2) NOT NULL
   igv_amount          numeric(15,2) NOT NULL
   total               numeric(15,2) NOT NULL
@@ -588,17 +685,17 @@ incoming_invoices
   detraction_constancia_fecha     date
   detraction_constancia_url       text
   detraction_constancia_xml_url   text
-  -- SUNAT electronic document fields (extracted from XML)
-  serie_numero        text
-  fecha_emision       date
-  tipo_documento_code text
-  ruc_emisor          text                            -- vendor RUC (validated vs contact.ruc)
-  ruc_receptor        text                            -- Korakuen's RUC
-  hash_cdr            text
-  estado_sunat        text
-  pdf_url             text                            -- Google Drive shareable URL
-  xml_url             text                            -- Google Drive shareable URL
-  drive_file_id       text                            -- Google Drive file ID (stable reference)
+  -- SUNAT electronic document fields — NULLABLE. Populated only when factura_status = 2 (received).
+  serie_numero        text                            -- nullable
+  fecha_emision       date                            -- nullable
+  tipo_documento_code text                            -- nullable
+  ruc_emisor          text                            -- nullable — validated vs contact.ruc when present
+  ruc_receptor        text                            -- nullable — Korakuen's RUC
+  hash_cdr            text                            -- nullable
+  estado_sunat        text                            -- nullable
+  pdf_url             text                            -- nullable, Google Drive shareable URL
+  xml_url             text                            -- nullable, Google Drive shareable URL
+  drive_file_id       text                            -- nullable, Google Drive file ID
   source              smallint NOT NULL DEFAULT 1
   submission_id       uuid
   notes               text
@@ -612,6 +709,43 @@ incoming_invoices
     CHECK (currency = 'PEN' OR exchange_rate IS NOT NULL)
   CONSTRAINT ii_ruc_format
     CHECK (ruc_emisor IS NULL OR length(ruc_emisor) = 11)
+  CONSTRAINT ii_received_requires_sunat
+    CHECK (factura_status = 1 OR (
+      serie_numero IS NOT NULL AND
+      fecha_emision IS NOT NULL AND
+      tipo_documento_code IS NOT NULL AND
+      ruc_emisor IS NOT NULL AND
+      ruc_receptor IS NOT NULL
+    ))
+```
+
+**Payment progress computation (derived, not stored):**
+```sql
+SELECT
+  ii.total_pen,
+  COALESCE(SUM(pl.amount_pen), 0)                        AS paid,
+  ii.total_pen - COALESCE(SUM(pl.amount_pen), 0)         AS outstanding,
+  CASE
+    WHEN COALESCE(SUM(pl.amount_pen), 0) = 0             THEN 'unpaid'
+    WHEN COALESCE(SUM(pl.amount_pen), 0) < ii.total_pen  THEN 'partially_paid'
+    ELSE 'paid'
+  END                                                     AS payment_state
+FROM incoming_invoices ii
+LEFT JOIN payment_lines pl ON pl.incoming_invoice_id = ii.id
+LEFT JOIN payments p ON p.id = pl.payment_id AND p.deleted_at IS NULL
+WHERE ii.id = :invoice_id
+GROUP BY ii.id, ii.total_pen
+```
+
+**Chase-the-factura query** — payments have been made but the paper factura never arrived:
+```sql
+SELECT ii.*
+FROM incoming_invoices ii
+LEFT JOIN payment_lines pl ON pl.incoming_invoice_id = ii.id
+LEFT JOIN payments p ON p.id = pl.payment_id AND p.deleted_at IS NULL
+WHERE ii.factura_status = 1 AND ii.deleted_at IS NULL
+GROUP BY ii.id
+HAVING COALESCE(SUM(pl.amount_pen), 0) > 0
 ```
 
 ### `incoming_invoice_line_items`
@@ -632,6 +766,7 @@ incoming_invoice_line_items
   igv_applies           boolean NOT NULL DEFAULT true
   igv_amount            numeric(15,2) NOT NULL DEFAULT 0
   total                 numeric(15,2) NOT NULL
+  cost_category_id      uuid REFERENCES cost_categories(id)  -- nullable, per-line categorization
   notes                 text
   created_at            timestamptz NOT NULL DEFAULT now()
   updated_at            timestamptz NOT NULL DEFAULT now()
@@ -641,7 +776,17 @@ incoming_invoice_line_items
   CONSTRAINT iili_igv_zero CHECK (igv_applies = true OR igv_amount = 0)
 ```
 
-**Immutability:** Locked when invoice `status = 3` (matched).
+**`cost_category_id` on line items:** Line-level categorization exists alongside
+the header-level `cost_category_id` on `incoming_invoices`. A single factura can
+mix materials and labor, so header-only tagging would lose that detail. Phase 1
+reporting still uses `payment_lines.cost_category_id` (the cash-basis view) as
+ground truth; the line-level invoice category is a Phase 1 data hook for the
+future Price Sentinel, which needs to compare individual line prices against
+historical references.
+
+**Immutability:** Locked when invoice `factura_status = 2 (received)` AND fully paid.
+While `expected` or partially paid, line items remain editable so corrections can
+flow through before the factura is finalized.
 
 ---
 
@@ -935,35 +1080,13 @@ WHERE l.deleted_at IS NULL
 GROUP BY l.id, l.principal_amount_pen
 ```
 
-**Obligation calendar view** — all upcoming payment obligations in one place:
-```sql
--- v_obligation_calendar view
-SELECT
-  'loan_schedule' AS obligation_type,
-  ls.loan_id      AS reference_id,
-  ls.due_date,
-  ls.amount_due   AS amount_pen,
-  l.lender_contact_id AS contact_id
-FROM loan_schedule ls
-JOIN loans l ON l.id = ls.loan_id AND l.deleted_at IS NULL
-
-UNION ALL
-
-SELECT
-  'incoming_invoice'  AS obligation_type,
-  ii.id               AS reference_id,
-  ii.fecha_emision    AS due_date,
-  ii.total_pen - COALESCE(SUM(pl.amount_pen), 0) AS amount_pen,
-  ii.contact_id
-FROM incoming_invoices ii
-LEFT JOIN payment_lines pl ON pl.incoming_invoice_id = ii.id
-LEFT JOIN payments p ON p.id = pl.payment_id AND p.deleted_at IS NULL
-WHERE ii.deleted_at IS NULL AND ii.status != 3  -- exclude fully matched
-GROUP BY ii.id, ii.total_pen, ii.fecha_emision, ii.contact_id
-HAVING ii.total_pen - COALESCE(SUM(pl.amount_pen), 0) > 0
-
-ORDER BY due_date ASC
-```
+**Obligation calendar view — DEFERRED.** The north star originally described an
+obligation calendar (a single chronological list of everything that needs to be
+paid, sorted by due date, spanning receivables, payables, and loan schedule rows).
+Korakuen pays its vendors upfront and does not extend credit to clients, so the
+real-world queue this was meant to surface is usually empty. The feature is
+explicitly deferred — the `loan_schedule` table still exists for tracking loan
+due dates, but no `v_obligation_calendar` view is planned for Phase 1.
 
 ---
 

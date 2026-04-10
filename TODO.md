@@ -63,10 +63,12 @@ Based on `docs/roadmap.md` and lessons from V1. Each step produces a deployable 
 - [ ] Partner management with profit split validation
 - [ ] Projects list + detail pages
 
-### Step 7 — Exchange Rate Job
-- [ ] Deploy `fetch_exchange_rates.py` on Render cron
-- [ ] Health endpoint (`/api/health`)
-- [ ] Dashboard exchange rate alert banner
+### Step 7 — Exchange Rate Job ✅
+- [x] Vercel Cron route (`/api/cron/fetch-exchange-rates`) fetching from BCRP
+- [x] `lib/bcrp.ts` helper with date-shift logic
+- [x] Health endpoint (`/api/health`)
+- [x] Dashboard exchange rate alert banner
+- [ ] **Deploy:** set `CRON_SECRET` in Vercel project env vars before next prod deploy
 
 ### Step 8 — Revenue Documents
 - [ ] Outgoing quotes CRUD + line items

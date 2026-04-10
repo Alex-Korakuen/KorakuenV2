@@ -106,9 +106,10 @@ korakuen/
     lifecycle.ts              — status transition rules for all document types
     db.ts                     — Supabase client
     exchange-rate.ts          — rate lookup helper
+    bcrp.ts                   — BCRP fetch + upsert (used by exchange-rate cron)
     sunat.ts                  — decolecta API wrapper (RUC/DNI lookup)
-  jobs/
-    fetch_exchange_rates.py   — daily SUNAT rate cron job (Python, runs on Render)
+  app/api/cron/
+    fetch-exchange-rates/     — daily Vercel Cron route → BCRP
   supabase/
     migrations/               — all schema migrations
     triggers/                 — activity_log trigger SQL
@@ -126,8 +127,6 @@ korakuen-engine/              — Python FastAPI
     services/                 — business logic (migrated from lib/)
     models/                   — Pydantic schemas
     db/
-  jobs/
-    fetch_exchange_rates.py
   tests/
   requirements.txt
 
@@ -154,7 +153,7 @@ korakuen-client/              — Next.js + CLI
 | Database | Supabase (Postgres) | Single source of truth. RLS on all tables. |
 | Dashboard | Vercel | Next.js. Free tier sufficient for 3 users. |
 | File storage | Google Drive | Invoices, quotes, payment receipts. URLs stored in DB. |
-| Exchange rate job | Render Cron Job (free) | `fetch_exchange_rates.py` — weekdays 09:00 Lima. |
+| Exchange rate job | Vercel Cron → Next.js route | `/api/cron/fetch-exchange-rates` calls BCRP API daily at 09:00 Lima. |
 | Activity log | Postgres trigger | Automatic. Zero application code. |
 
 ### Phase 2 additions
@@ -169,7 +168,7 @@ korakuen-client/              — Next.js + CLI
 
 | Service | Purpose | Provider | Auth |
 |---|---|---|---|
-| SUNAT XML endpoint | Daily USD/PEN exchange rate | SUNAT (official, free) | None |
+| BCRP statistics API | Daily USD/PEN exchange rate | Banco Central de Reserva del Perú (official, free) | None |
 | RUC/DNI lookup | Contact auto-fill from SUNAT padrón | apis.net.pe (decolecta) | Bearer token |
 | Google Drive API | File storage and inbox watching | Google | OAuth2 / Service Account |
 

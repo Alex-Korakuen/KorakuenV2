@@ -26,7 +26,7 @@ A private business management system for **Korakuen** (Constructora Korakuen E.I
 | Database | PostgreSQL on Supabase |
 | Website | Next.js + TypeScript on Vercel |
 | File storage | Google Drive (URLs stored in DB) |
-| Exchange rate job | Python cron job on Render |
+| Exchange rate job | Vercel Cron → Next.js route → BCRP API |
 | Package manager | npm |
 
 ---
@@ -38,7 +38,7 @@ korakuen_v2/
   app/
     (admin)/              — admin-only routes
     (partner)/            — partner-restricted routes
-    api/                  — route handlers (webhooks, health)
+    api/                  — route handlers (health, cron jobs)
     actions/              — server actions (API-shaped, thin)
   components/             — reusable UI components
   lib/
@@ -46,9 +46,8 @@ korakuen_v2/
     lifecycle.ts          — status transition rules for all document types
     db.ts                 — Supabase client
     exchange-rate.ts      — rate lookup helper
+    bcrp.ts               — BCRP fetch + upsert (used by exchange-rate cron)
     sunat.ts              — decolecta API wrapper (RUC/DNI lookup)
-  jobs/
-    fetch_exchange_rates.py — daily SUNAT rate cron job
   supabase/
     migrations/           — timestamped SQL migration files
     triggers/             — activity_log trigger SQL

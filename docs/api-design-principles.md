@@ -130,7 +130,137 @@ before deletion, and voiding is preferred over deletion in almost all cases.
 
 ---
 
-## Status Lifecycles
+## Formulas (Derived Calculations)
+
+The system stores payments as primary records and derives everything else at
+query time. These are the canonical formulas — any reporting endpoint must use
+the same math. They live here so every implementer reaches for the same
+reference instead of rederiving them per-feature.
+
+### Bank account balance
+
+```
+balance_pen(account) =
+  SUM(payments.total_amount_pen WHERE direction = inbound  AND bank_account_id = account)
+− SUM(payments.total_amount_pen WHERE direction = outbound AND bank_account_id = account)
+```
+
+Scoped to `deleted_at IS NULL`. Returned as a computed field on bank account
+responses. Also exposed via the SQL function `get_bank_account_balance(account_id)`.
+
+### Outgoing invoice payment progress
+
+Outgoing invoices split receivables across regular and Banco de la Nación
+accounts (the detracción portion). Both reduce the same invoice's outstanding.
+
+```
+expected_regular   = total_pen − detraction_amount   (or total_pen if no detracción)
+expected_bn        = detraction_amount               (0 if no detracción)
+paid_regular       = SUM(payment_lines.amount_pen WHERE outgoing_invoice_id = this
+                         AND payments.is_detraction = false)
+paid_bn            = SUM(payment_lines.amount_pen WHERE outgoing_invoice_id = this
+                         AND payments.is_detraction = true)
+outstanding_regular = expected_regular − paid_regular
+outstanding_bn      = expected_bn − paid_bn
+is_fully_paid       = (outstanding_regular = 0) AND (outstanding_bn = 0)
+```
+
+Returned under `_computed` on outgoing invoice responses.
+
+### Incoming invoice payment progress
+
+Stored as `factura_status` (expected | received) — **payment state is always derived**.
+
+```
+paid            = SUM(payment_lines.amount_pen WHERE incoming_invoice_id = this)
+outstanding     = total_pen − paid
+payment_state   = CASE
+                    WHEN paid = 0            THEN 'unpaid'
+                    WHEN paid < total_pen    THEN 'partially_paid'
+                    ELSE                          'paid'
+                  END
+```
+
+Returned under `_computed` on incoming invoice responses. Chase lists are
+queries that combine `factura_status` with the derived `paid` value — see
+`schema-reference.md` for the canonical SQL.
+
+### Project actual spend and margin
+
+```
+actual_spend_pen = SUM(payments.total_amount_pen
+                       WHERE direction = outbound AND project_id = P)
+estimated_cost_pen = SUM(project_budgets.budgeted_amount_pen WHERE project_id = P)
+expected_margin_pen = projects.contract_value_pen − estimated_cost_pen
+actual_margin_pen   = projects.contract_value_pen − actual_spend_pen
+```
+
+Estimated cost is always derived from `project_budgets` — never stored as a
+column on `projects`.
+
+### IGV position (net tax)
+
+```
+igv_output  = SUM(outgoing_invoices.igv_amount WHERE status IN (sent, partially_paid, paid))
+igv_input   = SUM(incoming_invoices.igv_amount WHERE factura_status = received)
+net_igv     = igv_output − igv_input
+```
+
+Positive `net_igv` means Korakuen owes SUNAT this amount. Negative means
+crédito fiscal. **`expected` incoming invoices are excluded** — they have no
+valid SUNAT paperwork so they cannot generate IGV credit.
+
+### Cash position (all accounts)
+
+```
+cash_position_pen = SUM(balance_pen(a)) for all active bank_accounts a
+cash_position_regular_pen = SUM(balance_pen(a)) WHERE a.account_type = 1 (regular)
+cash_position_bn_pen      = SUM(balance_pen(a)) WHERE a.account_type = 2 (BN)
+```
+
+BN balance is reported separately because it can only be used for tax payments.
+
+### Loan balance
+
+```
+principal_pen    = loans.principal_amount_pen
+total_repaid_pen = SUM(payment_lines.amount_pen WHERE loan_id = this AND line_type = loan)
+balance_pen      = principal_pen − total_repaid_pen
+status           = CASE
+                     WHEN total_repaid = 0           THEN 'active'
+                     WHEN total_repaid < principal   THEN 'partially_repaid'
+                     ELSE                                 'settled'
+                   END
+```
+
+Never stored — always derived from payment lines.
+
+### Partner settlement (liquidación)
+
+At project completion (or at any point for a progress view):
+
+```
+revenue_pen      = SUM(payments.total_amount_pen WHERE direction = inbound, project_id = P)
+total_costs_pen  = SUM(payments.total_amount_pen WHERE direction = outbound, project_id = P)
+gross_profit_pen = revenue_pen − total_costs_pen
+
+For each partner X on project P:
+  costs_by_x_pen  = SUM(payments.total_amount_pen WHERE direction = outbound,
+                        project_id = P, paid_by_partner_id = X)
+  profit_share_x  = gross_profit_pen × (partner.profit_split_pct / 100)
+  total_owed_x    = costs_by_x_pen + profit_share_x
+```
+
+In plain words: each partner gets reimbursed what they actually spent out of
+pocket, plus their agreed share of the gross profit. We split profit, not
+revenue — that is the whole point of this formula. Korakuen (which collects
+all revenue) owes each partner `total_owed_x`.
+
+Exposed via `GET /projects/{id}/settlement`.
+
+---
+
+
 
 Every financial document has a `status` field. Status transitions are enforced by the
 engine — clients cannot set arbitrary status values. Dedicated action endpoints handle
@@ -301,24 +431,38 @@ correct matching CLI and dashboard code without guesswork.
 
 ## External API Integrations
 
-### SUNAT Exchange Rate — `fetch_exchange_rates.py`
+### Exchange Rate Cron — `/api/cron/fetch-exchange-rates`
 
-Daily cron job that fetches the official USD/PEN rate from SUNAT's XML endpoint.
-No fallback. Fails loudly. Surfaces as a dashboard alert when missing.
+Daily Vercel Cron job that fetches the official USD/PEN rate from BCRP (the
+Peruvian central bank) and upserts it into `exchange_rates`. No fallback.
+Fails loudly. Surfaces as a dashboard alert when today's rate is missing.
 
-**Source:** `https://www.sunat.gob.pe/cl-at-ittipcam/tcS01Alias`
-**Script:** `fetch_exchange_rates.py` (in `korakuen-engine/jobs/`)
-**Schedule:** Render Cron Job — `0 14 * * 1-5` (09:00 Lima time, weekdays only)
-**Environment variable required:** `SUPABASE_DB_URL`
+**Source:** BCRP statistics API — `https://estadisticas.bcrp.gob.pe/estadisticas/series/api`
+Series `PD04639PD` (compra) + `PD04640PD` (venta) — the same SBS interbank rates
+SUNAT publishes for tax purposes. No auth, no rate limits, supports historical
+date ranges.
+
+**Route:** `app/api/cron/fetch-exchange-rates/route.ts`
+**Helper:** `lib/bcrp.ts` (BCRP fetch, parse, upsert)
+**Schedule:** Vercel Cron — `0 14 * * *` (14:00 UTC = 09:00 Lima time)
+The cron fires every day; weekends are skipped inside the route.
+**Environment variable required:** `CRON_SECRET` (shared secret used by Vercel
+to authenticate requests at `/api/cron/*`).
+
+**Date convention:** BCRP labels each rate by SBS closing date. SUNAT publishes
+that same rate on the *next* business day. Korakuen stores rates by SUNAT
+publication date (the date you would write on a tax document), so the cron
+shifts BCRP dates forward by one business day before upserting.
 
 What it stores per weekday:
 - `rate_type = 'compra'` — bank buy rate
 - `rate_type = 'venta'` — bank sell rate
 - `rate_type = 'promedio'` — arithmetic mean, used as default throughout the system
 
-Failure behaviour: exits with code 1, Render logs the failure, dashboard shows a
-persistent red banner until a rate for today is stored. Manual entry available via
-the dashboard at Settings → Tipos de Cambio → Registrar manualmente.
+Failure behaviour: route returns HTTP 500 with an error payload, Vercel logs
+the failure, dashboard shows a persistent red banner until a rate for today
+is stored. Manual entry available via the dashboard at
+Settings → Tipos de Cambio → Registrar manualmente.
 
 ---
 

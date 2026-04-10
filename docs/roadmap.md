@@ -249,15 +249,49 @@ export function validateProfitSplits(partners: ProjectPartner[]) {
 
 ---
 
-### Step 7 — Exchange Rate Job
+### Step 6.5 — Project Budgets
 
-The `fetch_exchange_rates.py` script already exists (see `jobs/` directory).
+Server actions in `app/actions/project-budgets.ts`:
 
-**Deploy on Render as a Cron Job:**
-- Build command: `pip install httpx psycopg2-binary python-dotenv`
-- Run command: `python fetch_exchange_rates.py`
-- Schedule: `0 14 * * 1-5` (09:00 Lima time, weekdays)
-- Environment variable: `SUPABASE_DB_URL`
+- `getProjectBudgets(projectId)` — list budget rows for a project with category names
+- `upsertProjectBudget(projectId, categoryId, amountPen, notes?)` — create or
+  update a single budget line (uses the unique `(project_id, cost_category_id)`
+  constraint to decide insert vs update)
+- `removeProjectBudget(projectId, categoryId)` — soft delete
+- `getEstimatedCost(projectId)` — returns the derived sum; used by the project
+  summary endpoint
+
+Validation lives in `lib/validators/project-budgets.ts`:
+- `budgeted_amount_pen >= 0`
+- Referenced `cost_category_id` must have `parent_id IS NULL` (top-level only)
+- No duplicate `(project_id, cost_category_id)` pairs
+
+**No UI in Phase 1.** Logic and validators only. Budget entry and display are
+deferred until later in the UI build — the data foundation exists so the
+project summary endpoint can compute expected margin the moment budgets exist.
+
+**Commit:** `feat: project_budgets — schema-backed estimated cost, logic only`
+
+---
+
+### Step 7 — Exchange Rate Job ✅
+
+The exchange rate cron lives entirely inside the Next.js app:
+
+- **Route:** `app/api/cron/fetch-exchange-rates/route.ts` — protected by `CRON_SECRET`
+- **Helper:** `lib/bcrp.ts` — fetches BCRP series `PD04639PD-PD04640PD`, parses,
+  applies the +1 business day shift to convert SBS closing date → SUNAT
+  publication date, and upserts three rows (compra/venta/promedio)
+- **Schedule:** `vercel.json` — `0 14 * * *` (14:00 UTC = 09:00 Lima time);
+  weekends are skipped inside the route, not by the cron expression
+- **Env vars on Vercel:** `CRON_SECRET` (the same value as in `.env.local`) and
+  the existing Supabase keys
+
+Why BCRP and not SUNAT directly: SUNAT's XML endpoint is now blocked by an F5
+firewall and only ever returned the latest rate (no historical lookup). BCRP is
+the central bank itself, free, no auth, no rate limits, and supports historical
+date ranges in a single call. BCRP republishes the same SBS rates SUNAT uses for
+tax purposes, just labeled by SBS closing date instead of SUNAT publication date.
 
 **System health endpoint in Next.js (`app/api/health/route.ts`):**
 ```typescript
@@ -323,14 +357,20 @@ Server actions for:
 - Full CRUD with line items
 - Status: draft → approved | cancelled
 - Line items locked on approval
+- "Track as expected invoice" one-click action on approved quotes
 
 **Incoming invoices:**
 - Full CRUD (header-only or with line items)
-- Status auto-updated by allocation engine: unmatched → partially_matched → matched
+- `factura_status` lifecycle: `expected → received` (one-way)
+- Payment progress (`unpaid | partially_paid | paid`) is **derived**, never stored —
+  returned under `_computed` in every invoice response
+- Three creation paths: from approved quote, from payment with no factura
+  linked, manual "New Incoming Invoice" with Expected toggle
+- SUNAT fields nullable while `expected`; required on transition to `received`
 - `incoming_quote_id` linkable after the fact
-- SUNAT XML fields extracted and stored on registration
+- SUNAT XML fields extracted and stored when transitioning to `received`
 
-**Commit:** `feat: cost documents — incoming quotes, incoming invoices with line items`
+**Commit:** `feat: cost documents — incoming quotes, incoming invoices with factura_status`
 
 ---
 
@@ -363,10 +403,16 @@ Server actions for:
 ### Step 11 — Bank Reconciliation
 
 - `getUnreconciled(bankAccountId)` — payments with `reconciled = false`
-- `reconcilePayment(id, bankReference)` — marks reconciled
+- `reconcilePayment(id, bankReference)` — marks reconciled, stamps
+  `reconciled_at` and `reconciled_by`
 - `unreconcilePayment(id)` — reverts
-- `reconcileGroup(groupId, bankReference)` — reconciles all payments in a
-  `reconciliation_group_id` atomically
+
+Reconciliation is per-payment, not batched. For Korakuen's scale (roughly
+50–100 transactions per month) the simple per-payment flow — open the queue,
+paste bank references from the statement one by one, confirm — is the right
+shape. No `reconciliation_group_id`, no batch import, no atomic group
+reconciliation. If volume grows enough to need bulk operations later, the
+schema can be extended without breaking existing data.
 
 **Commit:** `feat: bank reconciliation`
 
@@ -374,17 +420,35 @@ Server actions for:
 
 ### Step 12 — Reporting
 
-Server actions / route handlers for:
+All derived calculations follow the canonical formulas in
+`api-design-principles.md` under the "Formulas" section.
 
-- `getProjectSummary(projectId)` — contract value, invoiced, collected, costs,
-  gross profit, per-partner breakdown
-- `getIgvPosition(periodStart, periodEnd)` — igv_output, igv_input, net_igv
-- `getCashPosition()` — all accounts with balance, grouped by type
-- `getOutstandingReceivables()` — unpaid outgoing invoices with breakdown
-- `getOutstandingPayables()` — unmatched incoming invoices + quotes without invoices
-- `getSettlement(projectId)` — per-partner costs + profit share
+**Per-project endpoints:**
+- `getProjectSummary(projectId)` — contract value, estimated cost (derived from
+  `project_budgets`), invoiced, collected, actual spend, expected margin, actual
+  margin, per-partner cost breakdown
+- `getSettlement(projectId)` — per-partner costs + profit share (the liquidación
+  formula)
 
-**Commit:** `feat: core reporting — project summary, IGV, cash position, settlement`
+**Consolidated Financial Position view** — the single dashboard that answers
+"where does Korakuen stand right now?" in one screen. Replaces what would
+otherwise be five separate report endpoints. Returns:
+- Cash position — per bank account and total (regular accounts)
+- Banco de la Nación balance — reported separately (tax-only funds)
+- IGV position — output − input = net, with period selector
+- Loan positions — outstanding per active loan, total owed
+- Receivables summary — total outstanding across all outgoing invoices,
+  aggregated by client
+- Payables summary — total outstanding across all `received` incoming invoices,
+  aggregated by vendor
+- Chase list — `expected` incoming invoices that already have payments (need
+  factura paperwork)
+
+Action: `getFinancialPosition(periodStart?, periodEnd?)` returns all of the
+above in a single response. The dashboard renders it as one "Posición
+Financiera" page.
+
+**Commit:** `feat: reporting — project summary, settlement, financial position view`
 
 ---
 
@@ -471,9 +535,13 @@ No additional infrastructure needed. The same API the dashboard uses is what the
 |---|---|
 | SUNAT XML auto-import | Upload XML → auto-populate incoming invoice fields |
 | PDF generation | Quotes and invoices as PDFs (not SUNAT e-invoicing) |
-| Budget vs actual | Per-partida cost tracking against budgeted amounts |
+| Per-partida budgets | Line-item budget tracking (the Parametric Estimator) |
 | Recurring cost templates | For predictable periodic vendor payments |
 | Document generation via CLI | Agent generates and registers documents from terminal |
+| Retención modeling | 3% withholding on receivables when client is designated retention agent — deferred because rare in Korakuen's current client mix |
+| Obligation calendar | Chronological payables/receivables queue — deferred because Korakuen pays vendors upfront and does not extend credit, so the queue is usually empty |
+| Price Sentinel | Variance analysis — seeded from historical presupuestos once Phase 1 is stable |
+| Parametric Estimator | Recipe-based cost forecasting from project dimensions |
 
 ---
 
