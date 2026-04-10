@@ -507,7 +507,7 @@ Server actions for:
 
 ---
 
-### Step 9.5 — Self Contact Flag
+### Step 9.5 — Self Contact Flag ✅ (9.5a + 9.5b; 9.5c deferred)
 
 > Small standalone pass. Landed after Step 9 so the cost-document CRUD is
 > already in place and the new flag can be verified end-to-end against
@@ -520,35 +520,46 @@ the three rows IS Korakuen. This step closes that gap so both the
 Next.js UI and any future FastAPI / AI agent caller can resolve "who is
 self" from a single canonical lookup, with no env vars or constants.
 
-#### 9.5a — Schema migration
+#### 9.5a — Schema migration ✅
 
-New migration `supabase/migrations/<ts>_self_contact_flag.sql`:
+Migration `supabase/migrations/20260410000007_self_contact_flag.sql`:
 
-- Add `is_self boolean NOT NULL DEFAULT false` to `contacts`
-- Add partial unique index enforcing only one self row:
-  `CREATE UNIQUE INDEX contacts_single_self ON contacts (is_self) WHERE is_self = true`
-- Seed: set `is_self = true` on Korakuen's existing contact row, or
-  insert it via the SUNAT lookup flow if it doesn't exist yet. Running
-  twice must be a no-op.
+- `is_self boolean NOT NULL DEFAULT false` added to `contacts`
+- Partial unique index `contacts_single_self ON contacts (is_self)
+  WHERE is_self = true` enforces at most one self row
+- No inline seed — the row must be SUNAT-verified, which requires a
+  decolecta API call; seeding is handled by `scripts/seed-self-contact.ts`
 
 **Commit:** `feat: schema — contacts.is_self flag, unique self row`
 
-#### 9.5b — Self lookup helper
+#### 9.5b — Self lookup helper ✅
 
 New file `lib/self.ts`:
 
 - `getSelfContact(supabase)` — single query
   (`SELECT * FROM contacts WHERE is_self = true AND deleted_at IS NULL`),
-  returns the full row. Cached per-request via React `cache()` so
-  multiple callers in the same render don't hit the DB twice
+  returns the full row or `null` when unseeded. Cached per-request via
+  React `cache()` (first use of request-scoped memoization in the repo)
 - `getSelfRuc(supabase)` — convenience wrapper returning just the RUC
 
-Validators in `lib/validators/contacts.ts` get one addition:
-`assertCannotUnsetSelf(before, patch)` — blocks `updateContact` from
-flipping `is_self` from true to false (the partial unique index already
-prevents two selves, but we also don't want zero selves).
+**Immutability:** Rather than a bespoke `assertCannotUnsetSelf` guard, the
+Step 9.5b pass added `is_self` to the immutable-field list that
+`validateUpdateContact` already enforces via `validateImmutableFields`.
+This blocks both true→false and false→true via CRUD. The partial unique
+index guarantees at-most-one self at the DB level, and the seed script is
+the only path that sets the flag.
 
-**Commit:** `feat: self contact helper, unset-self guard`
+**Seed script** `scripts/seed-self-contact.ts`:
+
+- Hardcoded RUC `20615457109` + admin email (project-specific constants)
+- Signs in as admin via `TEST_ADMIN_PASSWORD` (not service role) so the
+  activity_log trigger's `auth.uid()` resolves to Alex's users row and the
+  audit trail is truthful. This is the canonical pattern for any future
+  admin-only maintenance script in this repo
+- Idempotent: creates the row via `lookupRuc()` if missing, updates it if
+  present without the flag, no-ops if already seeded
+
+**Commit:** `feat: self contact helper, is_self immutable, seed script`
 
 #### 9.5c — Wire into existing forms (deferred)
 

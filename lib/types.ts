@@ -175,6 +175,7 @@ export type ContactRow = {
   is_client: boolean;
   is_vendor: boolean;
   is_partner: boolean;
+  is_self: boolean;
   email: string | null;
   phone: string | null;
   address: string | null;

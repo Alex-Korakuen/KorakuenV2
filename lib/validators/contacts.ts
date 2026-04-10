@@ -105,7 +105,8 @@ export function validateUpdateContact(
   data: Record<string, unknown>,
   existing: ContactRow,
 ): ValidationResult<UpdateContactInput> {
-  // Immutable fields — block if present and different from existing
+  // Immutable fields — block if present and different from existing.
+  // is_self is set only by scripts/seed-self-contact.ts and never via CRUD.
   const immutableErrors = validateImmutableFields<ContactRow>(
     data,
     [
@@ -117,6 +118,7 @@ export function validateUpdateContact(
       "sunat_condicion",
       "sunat_verified",
       "sunat_verified_at",
+      "is_self",
     ],
     existing,
   );
