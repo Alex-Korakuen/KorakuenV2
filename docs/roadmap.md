@@ -172,7 +172,7 @@ export function canTransition(table: string, from: number, to: number): boolean 
 
 ---
 
-### Step 4 — Contacts
+### Step 4 — Contacts ✅
 
 Server actions in `app/actions/contacts.ts`:
 
@@ -203,7 +203,7 @@ export async function lookupRuc(ruc: string) {
 
 ---
 
-### Step 5 — Bank Accounts
+### Step 5 — Bank Accounts ✅
 
 Server actions in `app/actions/bank-accounts.ts`:
 
@@ -223,29 +223,59 @@ Or inline SQL via Supabase's `from().select()` with aggregation.
 
 ---
 
-### Step 6 — Projects and Partners
+### Step 6 — Projects and Partners ✅
 
 Server actions in `app/actions/projects.ts`:
 
-- `getProjects(filters)` — includes partner list
+- `getProjects(filters)` — paginated list, embeds each project's partners via a
+  single batched fetch (no N+1)
 - `createProject(data)`
-- `updateProject(id, data)`
+- `updateProject(id, data)` — strongly typed with `UpdateProjectInput`
 - `activateProject(id)` — prospect → active. Validates: contract exists, profit split = 100
 - `completeProject(id)` — active → completed
+- `archiveProject(id)` — completed → archived
+- `deleteProject(id)` — prospect only, blocks if any references exist
+- `getProject(id)` — detail view with embedded partners
 - `getProjectPartners(projectId)`
 - `upsertProjectPartner(projectId, data)` — add or update partner split
 - `removeProjectPartner(projectId, partnerId)`
 
-**Profit split validation in `validators/projects.ts`:**
-```typescript
-export function validateProfitSplits(partners: ProjectPartner[]) {
-  const sum = partners.reduce((acc, p) => acc + p.profit_split_pct, 0)
-  if (Math.abs(sum - 100) > 0.01)
-    throw new Error(`Profit splits sum to ${sum}%, must equal 100%`)
-}
-```
+**Profit split validation in `lib/validators/projects.ts`:** `validateProfitSplits`
+requires the set to sum to 100% within tolerance and is called by
+`validateProjectActivation` at the prospect → active transition.
 
-**Commit:** `feat: projects CRUD, lifecycle transitions, partner management`
+**Partner input validation in `lib/validators/project-partners.ts`:**
+`validateProjectPartnerInput` enforces field presence and `0 < pct ≤ 100`.
+(Originally scheduled for Step 6.5c — landed early as part of the post-audit
+fixes below.)
+
+**Partner lifecycle rule — "set in stone at activation":** Partner rosters are
+free to edit during the prospect phase, when admins iterate on who's involved
+and what the splits look like. Once a project transitions to `active`,
+`upsertProjectPartner` and `removeProjectPartner` return `CONFLICT` with the
+message "Los repartos quedan fijos al activar el proyecto." This is a hard
+lock, not a sum=100 guard — it matches the real workflow where splits are
+finalized before the first expense is logged and never touched afterward.
+The settlement formula in Step 12 depends on the 100%-invariant holding for
+the entire active lifetime of the project, and a hard lock is the only
+representation that guarantees it cannot silently drift.
+
+**Tests:** `lib/validators/__tests__/projects.test.ts` and
+`lib/validators/__tests__/project-partners.test.ts` cover the validators.
+
+**Commit:** `feat: projects & partners — CRUD, lifecycle transitions, partner management`
+
+**Post-audit fixes (April 2026):** A full audit of Step 6 against the roadmap
+and the API principles surfaced four issues, fixed in a follow-up pass:
+
+1. `getProjects` list now embeds partners as the roadmap originally required
+   (single batched query, no N+1).
+2. Partners frozen on active projects via the hard lock described above.
+3. `updateProject` parameter typed with `UpdateProjectInput` instead of
+   `Record<string, unknown>`.
+4. New test suite for `validateProjectPartnerInput` (11 cases).
+
+**Commit:** `refactor: step 6 post-audit fixes`
 
 ---
 
@@ -324,7 +354,7 @@ additive or rename operations — no destructive changes.
 
 #### 6.5c — Validators and validator-debt cleanup
 
-Three validator changes bundled so they land as one logical pass:
+Two validator changes bundled so they land as one logical pass:
 
 - **New** `lib/validators/project-budgets.ts`:
   - `validateCreateProjectBudget(data)` — amount ≥ 0; the referenced
@@ -337,14 +367,14 @@ Three validator changes bundled so they land as one logical pass:
     `expected → received` only; on `received`, require all SUNAT fields
     present
   - Remove any references to the old status vocabulary
-- **Retrofit of Step 6** — extract the inline validation currently at
-  `app/actions/project-partners.ts:54-60` into a new
-  `lib/validators/project-partners.ts` as `validateProjectPartnerInput(data)`,
-  and update the server action to call it. This is validator debt from
-  when Step 6 was built; we fix it while we're visiting the neighborhood,
-  not as a standalone cleanup pass later.
 
-**Commit:** `refactor: validators — project-budgets, incoming invoices, project-partners extraction`
+> **Note:** The Step 6 retrofit originally scheduled here — extracting the
+> inline project-partner validation into `lib/validators/project-partners.ts`
+> — was landed early as part of the Step 6 post-audit fixes, alongside a new
+> sum=100 guard on active-project partner mutations and a dedicated test
+> suite. That validator file and its tests already exist when 6.5c begins.
+
+**Commit:** `refactor: validators — project-budgets, incoming invoices`
 
 #### 6.5d — Project Budgets server actions
 

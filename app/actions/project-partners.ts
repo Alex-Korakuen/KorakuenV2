@@ -10,6 +10,7 @@ import type {
   ProjectPartnerRow,
   CreateProjectPartnerInput,
 } from "@/lib/types";
+import { validateProjectPartnerInput } from "@/lib/validators/project-partners";
 
 // ---------------------------------------------------------------------------
 // getProjectPartners
@@ -51,21 +52,9 @@ export async function upsertProjectPartner(
 ): Promise<ValidationResult<ProjectPartnerRow>> {
   await requireAdmin();
 
-  // Inline validation
-  const fields: Record<string, string> = {};
-
-  if (!data.contact_id) {
-    fields.contact_id = "Required";
-  }
-  if (!data.company_label?.trim()) {
-    fields.company_label = "Required";
-  }
-  if (data.profit_split_pct == null || data.profit_split_pct <= 0 || data.profit_split_pct > 100) {
-    fields.profit_split_pct = "Must be greater than 0 and at most 100";
-  }
-
-  if (Object.keys(fields).length > 0) {
-    return failure("VALIDATION_ERROR", "Partner validation failed", fields);
+  const inputValidation = validateProjectPartnerInput(data);
+  if (!inputValidation.success) {
+    return inputValidation as ValidationResult<ProjectPartnerRow>;
   }
 
   const supabase = await createServerClient();
@@ -80,6 +69,25 @@ export async function upsertProjectPartner(
     return failure("CONFLICT", "No se pueden modificar los socios de un proyecto archivado", {
       status: "Project is archived",
     });
+  }
+
+  // Partners are frozen once a project is active. The settlement formula
+  // depends on the 100%-sum invariant, and any change after expenses start
+  // flowing would silently corrupt partner payouts. Splits must be finalized
+  // during the prospect phase, before activation.
+  if (project.status === PROJECT_STATUS.active) {
+    return failure(
+      "CONFLICT",
+      "No se pueden modificar los socios de un proyecto activo. Los repartos quedan fijos al activar el proyecto.",
+      { status: "Partners are frozen after project activation" },
+    );
+  }
+  if (project.status === PROJECT_STATUS.completed) {
+    return failure(
+      "CONFLICT",
+      "No se pueden modificar los socios de un proyecto completado",
+      { status: "Project is completed" },
+    );
   }
 
   // Verify contact exists and is flagged as partner
@@ -172,7 +180,15 @@ export async function removeProjectPartner(
     return failure("NOT_FOUND", "Project not found");
   }
 
-  // Block removal from completed or archived projects
+  // Partners are frozen once a project leaves prospect status. Removal is only
+  // allowed during the prospect phase, before activation.
+  if (project.status === PROJECT_STATUS.active) {
+    return failure(
+      "CONFLICT",
+      "No se pueden eliminar socios de un proyecto activo. Los repartos quedan fijos al activar el proyecto.",
+      { status: "Partners are frozen after project activation" },
+    );
+  }
   if (project.status === PROJECT_STATUS.completed) {
     return failure("CONFLICT", "No se pueden eliminar socios de un proyecto completado", {
       status: "Project is completed",

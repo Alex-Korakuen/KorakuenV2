@@ -9,6 +9,7 @@ import type {
   ProjectRow,
   ProjectPartnerRow,
   CreateProjectInput,
+  UpdateProjectInput,
 } from "@/lib/types";
 import {
   validateCreateProject,
@@ -30,15 +31,15 @@ type ProjectListFilters = {
   offset?: number;
 };
 
+type ProjectWithPartners = ProjectRow & {
+  partners: ProjectPartnerRow[];
+};
+
 type PaginatedProjects = {
-  data: ProjectRow[];
+  data: ProjectWithPartners[];
   total: number;
   limit: number;
   offset: number;
-};
-
-type ProjectWithPartners = ProjectRow & {
-  partners: ProjectPartnerRow[];
 };
 
 // ---------------------------------------------------------------------------
@@ -86,8 +87,40 @@ export async function getProjects(
     return failure("NOT_FOUND", "Failed to fetch projects");
   }
 
+  const projects = (data ?? []) as ProjectRow[];
+
+  // Batched partner fetch — one query for all projects in the page
+  const partnersByProject = new Map<string, ProjectPartnerRow[]>();
+  if (projects.length > 0) {
+    const projectIds = projects.map((p) => p.id);
+    const { data: partnerRows, error: partnersError } = await supabase
+      .from("project_partners")
+      .select("*")
+      .in("project_id", projectIds)
+      .is("deleted_at", null)
+      .order("company_label", { ascending: true });
+
+    if (partnersError) {
+      return failure("NOT_FOUND", "Failed to fetch project partners");
+    }
+
+    for (const partner of (partnerRows ?? []) as ProjectPartnerRow[]) {
+      const bucket = partnersByProject.get(partner.project_id);
+      if (bucket) {
+        bucket.push(partner);
+      } else {
+        partnersByProject.set(partner.project_id, [partner]);
+      }
+    }
+  }
+
+  const projectsWithPartners: ProjectWithPartners[] = projects.map((p) => ({
+    ...p,
+    partners: partnersByProject.get(p.id) ?? [],
+  }));
+
   return success({
-    data: (data ?? []) as ProjectRow[],
+    data: projectsWithPartners,
     total: count ?? 0,
     limit,
     offset,
@@ -190,7 +223,7 @@ export async function createProject(
 
 export async function updateProject(
   id: string,
-  data: Record<string, unknown>,
+  data: UpdateProjectInput,
 ): Promise<ValidationResult<ProjectRow>> {
   await requireAdmin();
 
@@ -214,7 +247,7 @@ export async function updateProject(
     });
   }
 
-  const validation = validateUpdateProject(data as Partial<CreateProjectInput>);
+  const validation = validateUpdateProject(data);
   if (!validation.success) return validation as ValidationResult<ProjectRow>;
 
   const validated = validation.data;
