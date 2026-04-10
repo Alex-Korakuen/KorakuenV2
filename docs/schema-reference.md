@@ -168,6 +168,7 @@ contacts
   is_client         boolean NOT NULL DEFAULT false
   is_vendor         boolean NOT NULL DEFAULT false
   is_partner        boolean NOT NULL DEFAULT false
+  is_self           boolean NOT NULL DEFAULT false     -- true on exactly one row: Korakuen itself
   email             text
   phone             text
   address           text
@@ -190,6 +191,12 @@ contacts
 
 **Editable after creation:** `nombre_comercial`, `email`, `phone`, `address`,
 `is_client`, `is_vendor`, `is_partner`, `notes`.
+
+**`is_self` is immutable via CRUD.** It is set only by `scripts/seed-self-contact.ts`
+and cannot be toggled through `updateContact`. A partial unique index
+(`contacts_single_self ON contacts (is_self) WHERE is_self = true`) enforces that
+at most one row can carry the flag. Resolve Korakuen's row at runtime via
+`getSelfContact(supabase)` from `lib/self.ts`.
 
 ### `bank_accounts`
 
@@ -1179,6 +1186,7 @@ CREATE INDEX idx_projects_client ON projects(client_id) WHERE deleted_at IS NULL
 -- Contacts
 CREATE INDEX idx_contacts_ruc ON contacts(ruc) WHERE deleted_at IS NULL;
 CREATE INDEX idx_contacts_dni ON contacts(dni) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX contacts_single_self ON contacts (is_self) WHERE is_self = true;
 
 -- Transactions (most queried table)
 ```sql
@@ -1189,6 +1197,7 @@ CREATE INDEX idx_projects_client ON projects(client_id) WHERE deleted_at IS NULL
 -- Contacts
 CREATE INDEX idx_contacts_ruc ON contacts(ruc) WHERE deleted_at IS NULL;
 CREATE INDEX idx_contacts_dni ON contacts(dni) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX contacts_single_self ON contacts (is_self) WHERE is_self = true;
 
 -- Loans
 CREATE INDEX idx_loans_project  ON loans(project_id) WHERE deleted_at IS NULL;
