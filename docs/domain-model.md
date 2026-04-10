@@ -203,7 +203,17 @@ is signed. All contract fields must be populated before the project can transiti
 period of work. A valorización (progress document) may accompany the invoice as a PDF
 attachment — it is not a separate tracked entity in the system.
 
-**Lifecycle:** `draft → sent → partially_paid → paid | void`
+**Lifecycle:** `draft → sent → void`. Pure workflow state that the admin
+controls directly (manual click to mark sent, manual click to void). The
+`sent → draft` undo is allowed while no SUNAT fields have been committed
+to the invoice. `sent → void` is blocked while any `payment_lines` reference
+this invoice — allocations must be unwound first.
+
+Payment progress (`unpaid | partially_paid | paid`) and SUNAT registration
+(`not_submitted | pending | accepted | rejected`) are **both derived at
+query time** and returned under `_computed`. Neither is stored on the row.
+See `api-design-principles.md` → "Outgoing invoice payment progress" and
+"Outgoing invoice SUNAT registration" for the canonical formulas.
 
 **Key financial fields:**
 ```
@@ -506,7 +516,9 @@ is_active             — boolean
       Payment line: outgoing_invoice_id = this invoice, amount = total − detraction
    b. Detracción payment recorded: inbound, Banco de la Nación, is_detraction = true
       Payment line: outgoing_invoice_id = this invoice, amount = detraction_amount
-7. Invoice status becomes: partially_paid → paid (when outstanding = 0)
+7. Invoice `_computed.payment_state` moves from `partially_paid` to `paid`
+   as the sum of linked payment_lines reaches `total_pen`. The `status`
+   column stays at `sent` — payment progress is derived, not stored.
 8. Next billing period → repeat from step 4
 9. Final invoice paid → Project status: completed
 ```
@@ -629,7 +641,7 @@ This calculation is always derived — never stored. The engine exposes a
 The system can compute Korakuen's net IGV position at any time:
 
 ```
-igv_output = SUM(igv_amount on outgoing_invoices WHERE status IN (sent, partially_paid, paid))
+igv_output = SUM(igv_amount on outgoing_invoices WHERE status = sent AND estado_sunat = 'accepted')
 igv_input  = SUM(igv_amount on incoming_invoices WHERE factura_status = received)
 net_igv    = igv_output − igv_input
 ```

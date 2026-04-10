@@ -34,11 +34,14 @@ export const OUTGOING_QUOTE_STATUS = {
   expired: 5,
 } as const;
 
+// Workflow state only. Payment progress is derived from payment_lines and
+// returned under `_computed.payment_state` — never stored. SUNAT registration
+// is derived from `estado_sunat` and returned under `_computed.sunat_state`.
+// The integer value 5 is preserved for `void` so the column values stay
+// stable; 3 and 4 are retired.
 export const OUTGOING_INVOICE_STATUS = {
   draft: 1,
   sent: 2,
-  partially_paid: 3,
-  paid: 4,
   void: 5,
 } as const;
 

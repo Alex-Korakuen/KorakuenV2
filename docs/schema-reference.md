@@ -52,7 +52,7 @@ These rules apply to all tables unless explicitly noted as an exception.
 | `status` | `projects` | 1=prospect, 2=active, 3=completed, 4=archived, 5=rejected |
 | `billing_frequency` | `projects` | 1=weekly, 2=biweekly, 3=monthly, 4=milestone |
 | `status` | `outgoing_quotes` | 1=draft, 2=sent, 3=approved, 4=rejected, 5=expired |
-| `status` | `outgoing_invoices` | 1=draft, 2=sent, 3=partially_paid, 4=paid, 5=void |
+| `status` | `outgoing_invoices` | 1=draft, 2=sent, 5=void (payment progress derived from payment_lines) |
 | `detraction_status` | `outgoing_invoices` | 1=not_applicable, 2=pending, 3=received, 4=autodetracted |
 | `detraction_handled_by` | `outgoing_invoices` | 1=client_deposited, 2=not_applicable |
 | `status` | `incoming_quotes` | 1=draft, 2=approved, 3=cancelled |
@@ -472,7 +472,11 @@ every line item mutation.
 
 Periodic facturas sent to clients. One per billing period.
 
-**Lifecycle:** `draft → sent → partially_paid → paid | void`
+**Lifecycle:** `draft → sent → void`. Pure workflow state. `sent → draft`
+is allowed as an undo while no SUNAT fields are committed. `sent → void` is
+blocked while any `payment_lines` reference the invoice. Payment progress
+and SUNAT registration are each derived at query time and returned under
+`_computed` (see "Derived fields on outgoing invoices" below).
 
 ```sql
 outgoing_invoices
@@ -527,8 +531,18 @@ outgoing_invoices
         OR (detraction_rate IS NOT NULL AND detraction_amount IS NOT NULL))
 ```
 
-**Status is updated automatically** by the engine when allocations change:
-`partially_paid` when some payments are allocated, `paid` when `total_pen` is covered.
+**Status is workflow-only.** The `status` column never reflects payment
+progress or SUNAT registration. Both are derived at query time and returned
+under `_computed` on every outgoing invoice response:
+
+- `_computed.payment_state` — `unpaid | partially_paid | paid`, derived from
+  the sum of linked `payment_lines.amount_pen` vs `total_pen`.
+- `_computed.sunat_state` — `not_submitted | pending | accepted | rejected`,
+  derived from the `estado_sunat` column.
+- `_computed.paid_regular`, `paid_bn`, `outstanding_regular`, `outstanding_bn`,
+  `is_fully_paid` — split across regular receivables and Banco de la Nación
+  receivables (the detracción portion). See `api-design-principles.md` for the
+  canonical formulas.
 
 ### `outgoing_invoice_line_items`
 
@@ -1300,18 +1314,13 @@ These cannot be expressed as CHECK constraints and are enforced in application c
 14. **Submission promotion uniqueness:** A submission can only be approved once.
     Re-approving after `resulting_record_id` is set returns `409 CONFLICT`.
 
-15. **Outgoing invoice status auto-update:** When a payment line linking to an
-    outgoing invoice is created or deleted, the engine recalculates and updates
-    `outgoing_invoices.status`:
-    - `SUM(payment_lines.amount_pen) = 0` → remains at `sent`
-    - `0 < SUM < total_pen` → `partially_paid`
-    - `SUM >= total_pen` → `paid`
-
-    **Incoming invoices do NOT auto-update from payments.** Their `factura_status`
-    is independent of payment progress and only changes via an explicit
-    `expected → received` transition. Payment progress on an incoming invoice is
-    always derived at query time from the sum of linked payment lines and returned
-    under `_computed` — it is never stored.
+15. **Outgoing invoice status is workflow-only.** The `status` column carries
+    only `draft | sent | void`. Payment progress and SUNAT registration are
+    each derived at query time from payment_lines and the `estado_sunat`
+    column respectively, returned under `_computed.payment_state` and
+    `_computed.sunat_state`. The column is never touched by payment line
+    mutations. The same two-dimensional model applies to incoming invoices
+    (Step 6.5): `factura_status` is workflow, payment progress is derived.
 
 ---
 

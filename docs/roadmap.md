@@ -140,8 +140,7 @@ lib/
 export const TRANSITIONS = {
   outgoing_invoice: {
     1: [2],        // draft → sent
-    2: [3, 4, 5],  // sent → partially_paid | paid | void
-    3: [4, 5],     // partially_paid → paid | void
+    2: [1, 5],     // sent → draft (undo, no SUNAT data) | void (no payment lines)
   },
   incoming_quote: {
     1: [2, 3],     // draft → approved | cancelled
@@ -463,11 +462,15 @@ Server actions for:
 
 **Outgoing invoices:**
 - Full CRUD with line items
-- Status: draft → sent → partially_paid → paid | void
-- Status auto-updates when allocations change
-- `_computed` outstanding breakdown: `paid_regular`, `paid_bn`, `outstanding_regular`,
-  `outstanding_bn`, `is_fully_paid`
-- SUNAT XML validation in `validators/invoices.ts`
+- Status: `draft → sent → void` (workflow-only, manual transitions)
+- Undo: `sent → draft` allowed while no SUNAT fields are committed
+- Void: blocked while any `payment_lines` reference the invoice
+- Line items locked when `status != draft`
+- `_computed` block on every response: `payment_state`, `sunat_state`,
+  `paid_regular`, `paid_bn`, `outstanding_regular`, `outstanding_bn`,
+  `is_fully_paid` — all derived from payment_lines and `estado_sunat`
+- SUNAT field format validation in `validators/invoices.ts`
+  (serie_numero regex, RUC digit check, tipo_documento_code enum)
 
 **Commit:** `feat: revenue documents — quotes, outgoing invoices with line items`
 
@@ -524,11 +527,13 @@ Server actions for:
 - `getEligiblePayments(invoiceId, invoiceType)` — filtered list of payments
   eligible to allocate to this invoice (same contact or no contact, unallocated balance > 0)
 
-**Outgoing invoice status auto-updates** from payment line mutations
-(`sent → partially_paid → paid`). **Incoming invoices do NOT auto-update** —
-their `factura_status` is independent of payment progress, and payment state
-is always derived at query time. See `api-design-principles.md` → "Formulas"
-for the canonical incoming invoice payment progress computation.
+**Outgoing invoice status is workflow-only** and never touched by payment
+line mutations. The `_computed.payment_state` field is derived at query
+time from the sum of linked `payment_lines.amount_pen` vs `total_pen`,
+mirroring the same derivation used for incoming invoices. Both document
+types follow the two-dimensional model: workflow status on the row,
+payment progress under `_computed`. See `api-design-principles.md` →
+"Formulas" for the canonical computations.
 
 **Commit:** `feat: payments CRUD, payment lines, eligible payment filter`
 

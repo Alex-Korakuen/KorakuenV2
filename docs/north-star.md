@@ -139,7 +139,8 @@ made every query, every form, and every report harder.
 **What the system does:**
 
 **Outgoing invoices** (we bill the client):
-- Lifecycle: `draft -> sent -> partially_paid -> paid | void`
+- Lifecycle: `draft -> sent -> void` (workflow-only; payment progress and
+  SUNAT registration both derived at query time, mirroring incoming invoices)
 - Track subtotal, IGV, total, detraccion rate and amount
 - SUNAT fields: serie/numero, RUC emisor/receptor, CDR hash
 - Outstanding amount = total minus all allocated payments

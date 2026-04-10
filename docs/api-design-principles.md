@@ -150,22 +150,44 @@ responses. Also exposed via the SQL function `get_bank_account_balance(account_i
 
 ### Outgoing invoice payment progress
 
+The `status` column carries workflow state only (`draft | sent | void`).
+Payment progress is **always derived from payment_lines** — never stored.
 Outgoing invoices split receivables across regular and Banco de la Nación
 accounts (the detracción portion). Both reduce the same invoice's outstanding.
 
 ```
-expected_regular   = total_pen − detraction_amount   (or total_pen if no detracción)
-expected_bn        = detraction_amount               (0 if no detracción)
-paid_regular       = SUM(payment_lines.amount_pen WHERE outgoing_invoice_id = this
-                         AND payments.is_detraction = false)
-paid_bn            = SUM(payment_lines.amount_pen WHERE outgoing_invoice_id = this
-                         AND payments.is_detraction = true)
+expected_regular    = total_pen − COALESCE(detraction_amount, 0)
+expected_bn         = COALESCE(detraction_amount, 0)
+paid_regular        = SUM(payment_lines.amount_pen WHERE outgoing_invoice_id = this
+                          AND payments.is_detraction = false)
+paid_bn             = SUM(payment_lines.amount_pen WHERE outgoing_invoice_id = this
+                          AND payments.is_detraction = true)
 outstanding_regular = expected_regular − paid_regular
 outstanding_bn      = expected_bn − paid_bn
 is_fully_paid       = (outstanding_regular = 0) AND (outstanding_bn = 0)
+payment_state       = CASE
+                        WHEN paid_regular + paid_bn = 0           THEN 'unpaid'
+                        WHEN paid_regular + paid_bn < total_pen   THEN 'partially_paid'
+                        ELSE                                           'paid'
+                      END
 ```
 
-Returned under `_computed` on outgoing invoice responses.
+### Outgoing invoice SUNAT registration
+
+Also derived — never stored as a separate column. Read directly from the
+`estado_sunat` value:
+
+```
+sunat_state = CASE
+                WHEN estado_sunat IS NULL   THEN 'not_submitted'
+                WHEN estado_sunat = 'pending'  THEN 'pending'
+                WHEN estado_sunat = 'accepted' THEN 'accepted'
+                WHEN estado_sunat = 'rejected' THEN 'rejected'
+              END
+```
+
+Both `payment_state` and `sunat_state` are returned under `_computed` on
+every outgoing invoice response, alongside the split paid/outstanding fields.
 
 ### Incoming invoice payment progress
 
@@ -201,14 +223,23 @@ column on `projects`.
 ### IGV position (net tax)
 
 ```
-igv_output  = SUM(outgoing_invoices.igv_amount WHERE status IN (sent, partially_paid, paid))
-igv_input   = SUM(incoming_invoices.igv_amount WHERE factura_status = received)
+igv_output  = SUM(outgoing_invoices.igv_amount
+                  WHERE status = sent
+                    AND estado_sunat = 'accepted'
+                    AND deleted_at IS NULL)
+igv_input   = SUM(incoming_invoices.igv_amount
+                  WHERE factura_status = received
+                    AND deleted_at IS NULL)
 net_igv     = igv_output − igv_input
 ```
 
 Positive `net_igv` means Korakuen owes SUNAT this amount. Negative means
 crédito fiscal. **`expected` incoming invoices are excluded** — they have no
-valid SUNAT paperwork so they cannot generate IGV credit.
+valid SUNAT paperwork so they cannot generate IGV credit. **Outgoing invoices
+that are draft, void, or have `estado_sunat != 'accepted'` are excluded** —
+the IGV output obligation exists only once the document is legally registered
+in SUNAT's system. Sent-but-pending invoices show up in the report as soon as
+the billing provider confirms SUNAT acceptance.
 
 ### Cash position (all accounts)
 

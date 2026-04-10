@@ -31,13 +31,8 @@ const TRANSITIONS: Record<string, Record<number, number[]>> = {
   outgoing_invoice: {
     [OUTGOING_INVOICE_STATUS.draft]: [OUTGOING_INVOICE_STATUS.sent],
     [OUTGOING_INVOICE_STATUS.sent]: [
-      OUTGOING_INVOICE_STATUS.partially_paid,
-      OUTGOING_INVOICE_STATUS.paid,
-      OUTGOING_INVOICE_STATUS.void,
-    ],
-    [OUTGOING_INVOICE_STATUS.partially_paid]: [
-      OUTGOING_INVOICE_STATUS.paid,
-      OUTGOING_INVOICE_STATUS.void,
+      OUTGOING_INVOICE_STATUS.draft, // undo — validator blocks if SUNAT data committed
+      OUTGOING_INVOICE_STATUS.void,  // validator blocks if payment_lines reference this invoice
     ],
   },
   incoming_quote: {
@@ -81,8 +76,6 @@ const STATUS_LABELS: Record<string, Record<number, string>> = {
   outgoing_invoice: {
     [OUTGOING_INVOICE_STATUS.draft]: "draft",
     [OUTGOING_INVOICE_STATUS.sent]: "sent",
-    [OUTGOING_INVOICE_STATUS.partially_paid]: "partially_paid",
-    [OUTGOING_INVOICE_STATUS.paid]: "paid",
     [OUTGOING_INVOICE_STATUS.void]: "void",
   },
   incoming_quote: {
