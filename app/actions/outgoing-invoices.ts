@@ -249,10 +249,8 @@ export async function getOutgoingInvoices(
     _computed: computedByInvoice.get(i.id) ?? {
       payment_state: "unpaid",
       sunat_state: "not_submitted",
-      paid_regular: 0,
-      paid_bn: 0,
-      outstanding_regular: Number(i.total_pen),
-      outstanding_bn: Number(i.detraction_amount ?? 0),
+      paid: 0,
+      outstanding: Number(i.total_pen),
       is_fully_paid: false,
     },
   }));

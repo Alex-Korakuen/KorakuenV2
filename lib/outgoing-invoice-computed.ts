@@ -1,37 +1,52 @@
 /**
  * Derived fields for outgoing invoices — the `_computed` block.
  *
- * Three dimensions live here, none of which are stored on the row:
- *   - payment progress (derived from payment_lines)
+ * Two dimensions live here, neither stored on the row:
+ *   - payment progress (derived from payment_lines via the signed formula)
  *   - SUNAT registration (derived from estado_sunat)
- *   - split paid/outstanding across regular + Banco de la Nación accounts
  *
- * In Step 8, payment_lines always returns zero rows (no payment line CRUD
- * exists yet), so paid_regular/paid_bn are zero and the outstanding values
- * equal the invoice totals. When Step 10 lands and payment lines become
- * real, the same helper starts returning non-zero values with zero other
- * changes to the server actions.
+ * Paid is a signed sum: positive contributions come from inbound payments
+ * (money flowing toward Korakuen), negative contributions from outbound
+ * payments (refunds, self-detracción legs, internal transfers). The same
+ * formula handles every scenario — no buckets, no special cases. See
+ * docs/api-design-principles.md → "Invoice payment progress" for the
+ * canonical derivation and the scenarios it handles.
  *
- * Canonical formulas live in docs/api-design-principles.md under
- * "Outgoing invoice payment progress" and "Outgoing invoice SUNAT registration".
+ * Detraction columns on the row (detraction_rate, detraction_amount,
+ * detraction_status, detraction_handled_by, detraction_constancia_*) are
+ * informational reference data. This helper ignores them — they do not
+ * affect paid or outstanding. Accountants maintain them manually.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  PAYMENT_DIRECTION,
+} from "@/lib/types";
 import type { OutgoingInvoiceRow } from "@/lib/types";
 
-// Supabase returns foreign-table joins as arrays by default in the generated
-// types, even for m:1 relations. We accept either shape and normalize.
-type JoinedPayment = { is_detraction: boolean | null };
+type JoinedPayment = { direction: number | null; deleted_at: string | null };
 type LineWithPayment = {
   amount_pen: number;
   payments: JoinedPayment | JoinedPayment[] | null;
 };
 
-function isDetractionPayment(row: LineWithPayment): boolean {
+function paymentDirection(row: LineWithPayment): number | null {
   const p = row.payments;
-  if (p == null) return false;
-  if (Array.isArray(p)) return p.length > 0 && p[0]?.is_detraction === true;
-  return p.is_detraction === true;
+  if (p == null) return null;
+  if (Array.isArray(p)) return p.length > 0 ? p[0]?.direction ?? null : null;
+  return p.direction ?? null;
+}
+
+/**
+ * Signed contribution of a payment line to an outgoing invoice's paid:
+ * positive for inbound (money toward Korakuen), negative for outbound.
+ */
+function signedContribution(row: LineWithPayment): number {
+  const amt = Number(row.amount_pen);
+  const dir = paymentDirection(row);
+  if (dir === PAYMENT_DIRECTION.inbound) return amt;
+  if (dir === PAYMENT_DIRECTION.outbound) return -amt;
+  return 0;
 }
 
 export type OutgoingInvoicePaymentState =
@@ -48,10 +63,8 @@ export type OutgoingInvoiceSunatState =
 export type OutgoingInvoiceComputed = {
   payment_state: OutgoingInvoicePaymentState;
   sunat_state: OutgoingInvoiceSunatState;
-  paid_regular: number;
-  paid_bn: number;
-  outstanding_regular: number;
-  outstanding_bn: number;
+  paid: number;
+  outstanding: number;
   is_fully_paid: boolean;
 };
 
@@ -70,81 +83,67 @@ export function deriveSunatState(
   return "not_submitted";
 }
 
+function derivePaymentState(
+  totalPen: number,
+  paid: number,
+): OutgoingInvoicePaymentState {
+  if (paid <= 0) return "unpaid";
+  if (paid < totalPen) return "partially_paid";
+  return "paid";
+}
+
+function buildComputed(
+  totalPen: number,
+  paid: number,
+  estadoSunat: string | null,
+): OutgoingInvoiceComputed {
+  const outstanding = Math.max(totalPen - paid, 0);
+  return {
+    payment_state: derivePaymentState(totalPen, paid),
+    sunat_state: deriveSunatState(estadoSunat),
+    paid,
+    outstanding,
+    is_fully_paid: paid >= totalPen && totalPen > 0,
+  };
+}
+
 /**
  * Compute the full `_computed` block for a single outgoing invoice.
  *
- * Queries payment_lines joined on payments to get the split between
- * regular receipts and Banco de la Nación (detracción) receipts.
- * Zero rows in Step 8; real values once Step 10 ships payment line CRUD.
+ * Queries payment_lines joined on (non-deleted) payments and sums the
+ * direction-signed contributions of each linked line.
  */
 export async function computeOutgoingInvoicePaymentProgress(
   supabase: SupabaseClient,
   invoice: Pick<
     OutgoingInvoiceRow,
-    "id" | "total_pen" | "detraction_amount" | "estado_sunat"
+    "id" | "total_pen" | "estado_sunat"
   >,
 ): Promise<OutgoingInvoiceComputed> {
   const totalPen = Number(invoice.total_pen);
-  const detractionAmount = Number(invoice.detraction_amount ?? 0);
-  const expectedRegular = totalPen - detractionAmount;
-  const expectedBn = detractionAmount;
 
-  // Step 10 hook: sum linked payment_lines split by payments.is_detraction.
-  // Keeping the query live (rather than hard-coding zeros) so Step 10
-  // doesn't need to touch this file — payment_lines table is empty today,
-  // so the query naturally returns zeros.
   const { data: lines } = await supabase
     .from("payment_lines")
-    .select("amount_pen, payments!inner(is_detraction, deleted_at)")
+    .select("amount_pen, payments!inner(direction, deleted_at)")
     .eq("outgoing_invoice_id", invoice.id)
     .is("payments.deleted_at", null);
 
-  let paidRegular = 0;
-  let paidBn = 0;
+  let paid = 0;
   for (const row of (lines ?? []) as unknown as LineWithPayment[]) {
-    const amt = Number(row.amount_pen);
-    if (isDetractionPayment(row)) {
-      paidBn += amt;
-    } else {
-      paidRegular += amt;
-    }
+    paid += signedContribution(row);
   }
 
-  const outstandingRegular = Math.max(expectedRegular - paidRegular, 0);
-  const outstandingBn = Math.max(expectedBn - paidBn, 0);
-  const totalPaid = paidRegular + paidBn;
-
-  let paymentState: OutgoingInvoicePaymentState;
-  if (totalPaid === 0) {
-    paymentState = "unpaid";
-  } else if (totalPaid < totalPen) {
-    paymentState = "partially_paid";
-  } else {
-    paymentState = "paid";
-  }
-
-  return {
-    payment_state: paymentState,
-    sunat_state: deriveSunatState(invoice.estado_sunat),
-    paid_regular: paidRegular,
-    paid_bn: paidBn,
-    outstanding_regular: outstandingRegular,
-    outstanding_bn: outstandingBn,
-    is_fully_paid: outstandingRegular === 0 && outstandingBn === 0,
-  };
+  return buildComputed(totalPen, paid, invoice.estado_sunat);
 }
 
 /**
  * Batch version: compute the `_computed` block for many invoices in one
- * pair of queries. Used by getOutgoingInvoices to avoid an N+1 pattern.
+ * query. Used by getOutgoingInvoices to avoid an N+1 pattern.
  */
 export async function computeOutgoingInvoicePaymentProgressBatch(
   supabase: SupabaseClient,
   invoices: Array<
-    Pick<
-      OutgoingInvoiceRow,
-      "id" | "total_pen" | "detraction_amount" | "estado_sunat"
-    >
+    Pick<OutgoingInvoiceRow, "id" | "total_pen" | "estado_sunat">
   >,
 ): Promise<Map<string, OutgoingInvoiceComputed>> {
   const result = new Map<string, OutgoingInvoiceComputed>();
@@ -152,54 +151,23 @@ export async function computeOutgoingInvoicePaymentProgressBatch(
 
   const ids = invoices.map((i) => i.id);
 
-  // One query for all payment lines linked to any of the invoices
   const { data: lines } = await supabase
     .from("payment_lines")
-    .select("outgoing_invoice_id, amount_pen, payments!inner(is_detraction, deleted_at)")
+    .select("outgoing_invoice_id, amount_pen, payments!inner(direction, deleted_at)")
     .in("outgoing_invoice_id", ids)
     .is("payments.deleted_at", null);
 
-  const paidByInvoice = new Map<string, { regular: number; bn: number }>();
+  const paidByInvoice = new Map<string, number>();
   for (const row of (lines ?? []) as unknown as Array<
     LineWithPayment & { outgoing_invoice_id: string }
   >) {
-    const bucket = paidByInvoice.get(row.outgoing_invoice_id) ?? {
-      regular: 0,
-      bn: 0,
-    };
-    const amt = Number(row.amount_pen);
-    if (isDetractionPayment(row)) {
-      bucket.bn += amt;
-    } else {
-      bucket.regular += amt;
-    }
-    paidByInvoice.set(row.outgoing_invoice_id, bucket);
+    const current = paidByInvoice.get(row.outgoing_invoice_id) ?? 0;
+    paidByInvoice.set(row.outgoing_invoice_id, current + signedContribution(row));
   }
 
   for (const inv of invoices) {
-    const totalPen = Number(inv.total_pen);
-    const detractionAmount = Number(inv.detraction_amount ?? 0);
-    const expectedRegular = totalPen - detractionAmount;
-    const expectedBn = detractionAmount;
-    const paid = paidByInvoice.get(inv.id) ?? { regular: 0, bn: 0 };
-    const outstandingRegular = Math.max(expectedRegular - paid.regular, 0);
-    const outstandingBn = Math.max(expectedBn - paid.bn, 0);
-    const totalPaid = paid.regular + paid.bn;
-
-    let paymentState: OutgoingInvoicePaymentState;
-    if (totalPaid === 0) paymentState = "unpaid";
-    else if (totalPaid < totalPen) paymentState = "partially_paid";
-    else paymentState = "paid";
-
-    result.set(inv.id, {
-      payment_state: paymentState,
-      sunat_state: deriveSunatState(inv.estado_sunat),
-      paid_regular: paid.regular,
-      paid_bn: paid.bn,
-      outstanding_regular: outstandingRegular,
-      outstanding_bn: outstandingBn,
-      is_fully_paid: outstandingRegular === 0 && outstandingBn === 0,
-    });
+    const paid = paidByInvoice.get(inv.id) ?? 0;
+    result.set(inv.id, buildComputed(Number(inv.total_pen), paid, inv.estado_sunat));
   }
 
   return result;
