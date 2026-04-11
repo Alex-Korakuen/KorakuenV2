@@ -571,7 +571,7 @@ up — the helper and migration are enough to unblock it.
 
 ---
 
-### Step 10 — Payments and Payment Lines
+### Step 10 — Payments and Payment Lines ✅
 
 > **The mental model.** One payment = one bank statement entry. The
 > header's `total_amount` is always `SUM(payment_lines.amount)` —
