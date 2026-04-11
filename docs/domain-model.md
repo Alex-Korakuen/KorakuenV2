@@ -230,16 +230,22 @@ detraction_amount     — nullable, always in PEN
 
 **Derived at query time (not stored):**
 ```
-expected_regular      = total_pen − detraction_amount
-expected_bn           = detraction_amount
-paid_regular          = SUM(payment_lines where outgoing_invoice_id = this
-                            AND payment.is_detraction = false)
-paid_bn               = SUM(payment_lines where outgoing_invoice_id = this
-                            AND payment.is_detraction = true)
-outstanding_regular   = expected_regular − paid_regular
-outstanding_bn        = expected_bn − paid_bn
-is_fully_paid         = outstanding_regular = 0 AND outstanding_bn = 0
+-- Signed single-bucket formula. Positive contributions = money toward
+-- Korakuen (inbound), negative = money away from Korakuen (outbound).
+-- Refunds and self-detracción legs flow through the same mechanism.
+paid           = SUM(
+                   CASE WHEN payment.direction = 1 THEN  payment_line.amount_pen
+                        WHEN payment.direction = 2 THEN -payment_line.amount_pen
+                   END
+                 ) where outgoing_invoice_id = this AND payment.deleted_at IS NULL
+outstanding    = MAX(total_pen − paid, 0)
+is_fully_paid  = (paid >= total_pen)
 ```
+
+`detraction_rate` and `detraction_amount` are stored informational
+reference data — they do not participate in the derivation above. See
+`api-design-principles.md` → "Invoice payment progress" for the canonical
+formula and the scenarios it handles.
 
 **SUNAT document fields (extracted from XML at registration):**
 ```
@@ -590,18 +596,44 @@ is_active             — boolean
 
 ### Autodetracción (exceptional case)
 
+When a client pays the full invoice amount to the regular account
+without withholding the detracción, Alex is responsible for depositing
+the detracción portion into Banco de la Nación himself. The system
+records this as the real bank movements (one outbound from regular,
+one inbound to BN) and both legs can be linked to the invoice for
+history. The signed formula keeps the paid/outstanding math correct
+automatically — it does not require a special case.
+
 ```
 1. Client pays full amount to regular account (should have deducted detraction)
 2. Payment recorded: inbound, regular account, full amount
-   Payment line: outgoing_invoice_id = invoice
-   [This overstates regular receipts by the detraction amount]
-3. SUNAT autodetracts from our Banco de la Nación
-4. Payment recorded: outbound, Banco de la Nación, detraction amount, is_detraction = true
-   Payment line: outgoing_invoice_id = same invoice
-5. Invoice detraction_status set to: autodetracted
-6. Notes on original payment updated to flag the irregularity
-7. Bank reconciliation will surface the BN debit — reconciled against step 4 payment
+   Payment line: outgoing_invoice_id = invoice, line_type = 1 (invoice)
+   [Invoice paid = total_pen, outstanding = 0 — the cash side is settled]
+3. Alex makes the detracción transfer: two real bank movements, opposite
+   directions, different accounts, same amount (the detracción amount)
+4. Payment 2 recorded: outbound, regular account, detracción amount
+   Payment line: outgoing_invoice_id = same invoice (preserved as history)
+   [Contributes −detraction_amount under the signed formula]
+5. Payment 3 recorded: inbound, Banco de la Nación, detracción amount
+   (is_detraction = true auto-derived from the BN bank account)
+   Payment line: outgoing_invoice_id = same invoice (preserved as history)
+   [Contributes +detraction_amount under the signed formula]
+6. Net effect: paid is unchanged (e.g. 100 − 12 + 12 = 100), outstanding
+   stays at zero, and both transfer legs appear in the invoice's
+   payment history for audit purposes
+7. Accountant fills detraction_constancia_code, detraction_constancia_fecha,
+   and detraction_constancia_url via updateOutgoingInvoice; optionally
+   sets detraction_status to "autodetracted". These are informational
+   flags — the system never enforces a state machine around them.
+8. Bank reconciliation surfaces each leg as its own statement entry —
+   the regular-account outbound on the BCP statement and the BN inbound
+   on the Banco de la Nación statement. Each reconciles independently.
 ```
+
+Between steps 4 and 5 (the window between recording the outbound leg
+and the inbound leg), `outstanding` will transiently show the detracción
+amount. This is accepted — the moment the second leg lands, the signed
+sum self-corrects. Alex can record both legs in either order.
 
 ---
 

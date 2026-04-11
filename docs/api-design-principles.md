@@ -148,38 +148,87 @@ balance_pen(account) =
 Scoped to `deleted_at IS NULL`. Returned as a computed field on bank account
 responses. Also exposed via the SQL function `get_bank_account_balance(account_id)`.
 
-### Outgoing invoice payment progress
+### Invoice payment progress (outgoing and incoming)
 
-The `status` column carries workflow state only (`draft | sent | void`).
-Payment progress is **always derived from payment_lines** — never stored.
-Outgoing invoices split receivables across regular and Banco de la Nación
-accounts (the detracción portion). Both reduce the same invoice's outstanding.
+The `status` column on outgoing invoices carries workflow state only
+(`draft | sent | void`); `factura_status` on incoming invoices tracks
+whether the SUNAT paperwork is in hand (`expected | received`). Payment
+progress is **always derived from payment_lines** — never stored on either
+side, never conflated with workflow state.
+
+**`paid` is a signed sum.** The sign is positive when money flows **toward**
+the invoice's owner (Korakuen for outgoing, the vendor for incoming) and
+negative when it flows away. One formula shape handles normal payments,
+refunds, self-detracciones, and internal transfers — the direction column
+on `payments` carries the semantics.
 
 ```
-expected_regular    = total_pen − COALESCE(detraction_amount, 0)
-expected_bn         = COALESCE(detraction_amount, 0)
-paid_regular        = SUM(payment_lines.amount_pen WHERE outgoing_invoice_id = this
-                          AND payments.is_detraction = false)
-paid_bn             = SUM(payment_lines.amount_pen WHERE outgoing_invoice_id = this
-                          AND payments.is_detraction = true)
-outstanding_regular = expected_regular − paid_regular
-outstanding_bn      = expected_bn − paid_bn
-is_fully_paid       = (outstanding_regular = 0) AND (outstanding_bn = 0)
-payment_state       = CASE
-                        WHEN paid_regular + paid_bn = 0           THEN 'unpaid'
-                        WHEN paid_regular + paid_bn < total_pen   THEN 'partially_paid'
-                        ELSE                                           'paid'
-                      END
+-- Outgoing invoice (money flows toward Korakuen)
+paid = SUM(
+         CASE WHEN p.direction = 1 (inbound)  THEN  pl.amount_pen
+              WHEN p.direction = 2 (outbound) THEN -pl.amount_pen
+         END
+       )
+       FROM payment_lines pl
+       JOIN payments p ON p.id = pl.payment_id
+       WHERE pl.outgoing_invoice_id = this AND p.deleted_at IS NULL
+
+-- Incoming invoice (money flows toward the vendor)
+paid = SUM(
+         CASE WHEN p.direction = 2 (outbound) THEN  pl.amount_pen
+              WHEN p.direction = 1 (inbound)  THEN -pl.amount_pen
+         END
+       )
+       FROM payment_lines pl
+       JOIN payments p ON p.id = pl.payment_id
+       WHERE pl.incoming_invoice_id = this AND p.deleted_at IS NULL
+
+outstanding    = MAX(total_pen - paid, 0)  -- clamped for display
+is_fully_paid  = (paid >= total_pen)       -- uses raw (unclamped) paid
+payment_state  = CASE
+                   WHEN paid <= 0             THEN 'unpaid'
+                   WHEN paid <  total_pen     THEN 'partially_paid'
+                   ELSE                            'paid'
+                 END
 ```
+
+**Why signed, not absolute.** The signed formula handles four real-world
+scenarios with one mechanism:
+
+1. **Normal payment** — client pays Alex (inbound → outgoing) or Alex
+   pays vendor (outbound → incoming). Positive contribution.
+2. **Refund** — Alex refunds a client (outbound linked to outgoing) or a
+   vendor refunds Alex (inbound linked to incoming). Negative contribution;
+   outstanding goes back up.
+3. **Self-detracción** — client pays 100% to the regular account; Alex
+   later moves the detracción portion from regular to Banco de la Nación.
+   Both legs (outbound from regular, inbound to BN) are linked to the same
+   outgoing invoice. They net to zero by construction — invoice paid is
+   unchanged, but the transfer shows up in the invoice's history.
+4. **Transient half-state** — if Alex records one leg of a self-detracción
+   before the other, `outstanding` transiently shows positive. This is
+   accepted behavior; the moment the second leg lands, it self-corrects.
+
+**Outstanding is clamped at zero for display.** A cleanly paid invoice
+plus a partial outbound reversal would otherwise show negative outstanding
+in the UI during the interval between the two legs. `is_fully_paid` uses
+the raw unclamped `paid` so a fully-refunded invoice (paid = 0) flips back
+to `unpaid` rather than getting stuck as "paid".
+
+**Detraccion columns are informational.** `detraction_rate`,
+`detraction_amount`, `detraction_status`, `detraction_handled_by`, and the
+`detraction_constancia_*` fields are stored reference data, not inputs to
+the formula above. No derivation reads them; no validator gates on them.
+Accountants maintain them manually.
 
 ### Outgoing invoice SUNAT registration
 
-Also derived — never stored as a separate column. Read directly from the
+Derived — never stored as a separate column. Read directly from the
 `estado_sunat` value:
 
 ```
 sunat_state = CASE
-                WHEN estado_sunat IS NULL   THEN 'not_submitted'
+                WHEN estado_sunat IS NULL      THEN 'not_submitted'
                 WHEN estado_sunat = 'pending'  THEN 'pending'
                 WHEN estado_sunat = 'accepted' THEN 'accepted'
                 WHEN estado_sunat = 'rejected' THEN 'rejected'
@@ -187,25 +236,19 @@ sunat_state = CASE
 ```
 
 Both `payment_state` and `sunat_state` are returned under `_computed` on
-every outgoing invoice response, alongside the split paid/outstanding fields.
+every outgoing invoice response.
 
-### Incoming invoice payment progress
+### Incoming invoice "needs factura" flag
 
-Stored as `factura_status` (expected | received) — **payment state is always derived**.
+Incoming invoices carry one extra derived field — `needs_factura` — which
+combines workflow and payment state:
 
 ```
-paid            = SUM(payment_lines.amount_pen WHERE incoming_invoice_id = this)
-outstanding     = total_pen − paid
-payment_state   = CASE
-                    WHEN paid = 0            THEN 'unpaid'
-                    WHEN paid < total_pen    THEN 'partially_paid'
-                    ELSE                          'paid'
-                  END
+needs_factura = (factura_status = 'expected' AND paid > 0)
 ```
 
-Returned under `_computed` on incoming invoice responses. Chase lists are
-queries that combine `factura_status` with the derived `paid` value — see
-`schema-reference.md` for the canonical SQL.
+Surfaces invoices where Alex has already sent money and needs to nag the
+vendor for the paper trail.
 
 ### Project actual spend and margin
 
@@ -345,11 +388,9 @@ Convention: computed fields are clearly labeled in the response:
   "id": "uuid",
   "total": 100000.00,
   "_computed": {
-    "paid_regular": 88000.00,
-    "paid_bn": 12000.00,
-    "total_paid": 100000.00,
-    "outstanding_regular": 0.00,
-    "outstanding_bn": 0.00,
+    "payment_state": "paid",
+    "paid": 100000.00,
+    "outstanding": 0.00,
     "is_fully_paid": true
   }
 }

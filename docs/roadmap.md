@@ -467,8 +467,8 @@ Server actions for:
 - Void: blocked while any `payment_lines` reference the invoice
 - Line items locked when `status != draft`
 - `_computed` block on every response: `payment_state`, `sunat_state`,
-  `paid_regular`, `paid_bn`, `outstanding_regular`, `outstanding_bn`,
-  `is_fully_paid` — all derived from payment_lines and `estado_sunat`
+  `paid`, `outstanding`, `is_fully_paid` — all derived from payment_lines
+  (single-bucket signed formula) and `estado_sunat`
 - SUNAT field format validation in `validators/invoices.ts`
   (serie_numero regex, RUC digit check, tipo_documento_code enum)
 
@@ -573,15 +573,67 @@ up — the helper and migration are enough to unblock it.
 
 ### Step 10 — Payments and Payment Lines
 
-> **The mental model.** One payment = one bank statement entry. The header's
-> `total_amount` is always `SUM(payment_lines.amount)` — engine-enforced,
-> never entered manually. Lines describe what the money was for: paying an
-> invoice, covering a bank fee, depositing a detracción, or a general
-> expense. Alex always knows who paid / was paid at recording time, so
-> there is no "pot of unallocated cash" waiting to be matched later. When
-> one bank movement turns out to cover multiple invoices, the line is
-> **split**, not supplemented — the header total never drifts from the
-> bank statement.
+> **The mental model.** One payment = one bank statement entry. The
+> header's `total_amount` is always `SUM(payment_lines.amount)` —
+> engine-recomputed, never entered manually. Lines describe what the
+> money was for: paying an invoice, covering a bank fee, depositing a
+> detracción, or a general expense. Alex always knows who paid / was
+> paid at recording time, so there is no "pot of unallocated cash"
+> waiting to be matched later.
+
+**Paid is a signed sum.** An invoice's `paid` value is the signed sum
+of its linked payment lines, where the sign is positive when money
+flows **toward** the invoice's owner and negative when it flows away:
+
+```
+-- Outgoing invoice (money flows toward Korakuen)
+paid = SUM(
+  CASE WHEN p.direction = 1 (inbound)  THEN  pl.amount_pen
+       WHEN p.direction = 2 (outbound) THEN -pl.amount_pen
+  END
+) WHERE pl.outgoing_invoice_id = this AND p.deleted_at IS NULL
+
+-- Incoming invoice (money flows toward the vendor)
+paid = SUM(
+  CASE WHEN p.direction = 2 (outbound) THEN  pl.amount_pen
+       WHEN p.direction = 1 (inbound)  THEN -pl.amount_pen
+  END
+) WHERE pl.incoming_invoice_id = this AND p.deleted_at IS NULL
+
+outstanding   = MAX(total_pen - paid, 0)   -- clamped for display
+is_fully_paid = (paid >= total_pen)        -- uses raw (unclamped) paid
+payment_state = CASE WHEN paid <= 0          THEN 'unpaid'
+                     WHEN paid <  total_pen  THEN 'partially_paid'
+                     ELSE                         'paid' END
+```
+
+The signed formula handles four scenarios with one mechanism:
+
+- **Normal payment.** Client pays Alex (inbound → outgoing invoice) or
+  Alex pays vendor (outbound → incoming invoice) — positive contribution,
+  outstanding drops.
+- **Refund.** Alex refunds a client (outbound linked to outgoing) or a
+  vendor refunds Alex (inbound linked to incoming) — negative
+  contribution, outstanding goes back up.
+- **Self-detracción.** When a client pays 100% to the regular account
+  and Alex needs to move the detracción amount himself into Banco de la
+  Nación, both legs of the transfer (outbound from regular, inbound to
+  BN) are linked to the same outgoing invoice. They net to zero; the
+  invoice's paid total is unchanged; the history of the transfer is
+  preserved on the invoice page.
+- **Transient half-state.** If Alex records one leg of a self-detracción
+  before the other, `outstanding` transiently shows positive until the
+  second leg lands. Accepted behavior, not a bug — it self-corrects the
+  moment the pair is complete.
+
+**Single bucket. No detracción enforcement.** There is no
+`outstanding_regular` / `outstanding_bn` split on outgoing invoices.
+Detracciones are a legal/accounting concern, not a bookkeeping one —
+the `detraction_rate`, `detraction_amount`, `detraction_status`, and
+`detraction_handled_by` columns remain as informational reference data.
+Accountants fill `detraction_constancia_*` fields manually via
+`updateOutgoingInvoice` / `updateIncomingInvoice` when the real-world
+process is done. No validators gate on any of these columns.
 
 **Payments (header):**
 
@@ -589,12 +641,15 @@ up — the helper and migration are enough to unblock it.
   `direction`, `contact_id`, `date_from`/`date_to`, `reconciled`,
   `has_unlinked_lines`
 - `getPayment(id)` — detail with lines + `_computed` block
-- `createPayment(header, lines[])` — atomic, requires ≥1 line, header
-  totals derived from `SUM(lines.amount)` / `SUM(lines.amount_pen)`.
-  Validates: BN account rules (`is_detraction = true` when
-  `bank_account.account_type = banco_de_la_nacion`), `paid_by_partner_id`
-  only on outbound, currency/exchange_rate consistency, and the currency
-  rule below for any line that already has an invoice link.
+- `createPayment(header, lines[])` — atomic, requires ≥1 line. The
+  server **derives `is_detraction`** from the bank account
+  (`bank_account.account_type = banco_de_la_nacion` → `true`); any
+  user-supplied value is ignored. Validates BN currency rule (BN
+  accounts are PEN only), `paid_by_partner_id` only on outbound,
+  currency/exchange_rate consistency, and the currency rule below for
+  any line that already has an invoice link. Header totals are
+  precomputed as `SUM(lines.amount)` / `SUM(lines.amount_pen)` at
+  insert time.
 - `updatePayment(id, patch)` — metadata only: `payment_date`,
   `bank_reference`, `notes`, `project_id`, `contact_id`,
   `paid_by_partner_id`, `drive_file_id`. `direction`, `bank_account_id`,
@@ -605,9 +660,10 @@ up — the helper and migration are enough to unblock it.
 **Payment lines (detail):**
 
 - `splitPaymentLine(lineId, splits[])` — replaces one line with N new
-  lines whose amounts sum exactly to the original. Each split carries its
-  own `line_type`, document link, and `cost_category_id`. Header totals
-  are unchanged by design. Blocked if the parent payment is reconciled.
+  lines whose amounts sum exactly to the original. Each split carries
+  its own `line_type`, document link, and `cost_category_id`. Header
+  totals are unchanged by construction. Blocked if the parent payment
+  is reconciled.
 - `updatePaymentLine(lineId, patch)` — edits line metadata (`notes`,
   `cost_category_id`) without changing the amount or the invoice link.
   Link changes go through `linkPaymentLineToInvoice` /
@@ -615,27 +671,35 @@ up — the helper and migration are enough to unblock it.
 - `linkPaymentLineToInvoice(lineId, invoiceId, invoiceType)` — the
   "Assign payment" action from the invoice detail modal. Atomic:
   1. Validates currency match (see "Currency rule" below).
-  2. Determines the target bucket — `outstanding_regular` or
-     `outstanding_bn` for outgoing invoices (based on `payments.is_detraction`),
-     or `outstanding` for incoming invoices.
-  3. If `line.amount_pen > target_outstanding_pen`, **auto-splits** the
-     line into two siblings: part A fills the bucket exactly
-     (flipped to `line_type = invoice` with the invoice link set), part B
-     is the remainder left as a fresh general line with no link.
-  4. If `line.amount_pen ≤ target`, links the whole line without
-     splitting.
+  2. Computes the line's signed contribution to the target invoice
+     (positive when the payment direction matches the
+     money-toward-owner side, negative otherwise).
+  3. Computes the invoice's current signed `paid`.
+  4. If the contribution is **positive** AND
+     `line.amount_pen > (total_pen - current_paid)`: auto-splits the
+     line into two siblings — Part A fills the remaining outstanding
+     exactly (flipped to `line_type = invoice` with the invoice link
+     set), Part B is the remainder left as a fresh general line with
+     no link.
+  5. Otherwise links the whole line without splitting.
+     Negative-direction contributions never split — refunds and
+     self-detracción legs preserve their full amount as history.
 
   Blocked if reconciled.
 - `unlinkPaymentLineFromInvoice(lineId)` — reverses a prior link. Flips
   `line_type` back to `general` and clears the invoice link. Does not
   auto-merge with adjacent general lines. Blocked if reconciled.
-- `getLinkablePaymentLines(invoiceId, invoiceType)` — the candidate
-  picker for the "Assign payment" button. Returns lines where
-  `line_type = general`, all document links are NULL, parent payment
-  direction matches the invoice side (inbound for outgoing, outbound for
-  incoming), payment contact matches or is NULL, payment is not
-  reconciled or soft-deleted, and payment currency is compatible with
-  the invoice currency under the rule below.
+- `getLinkablePaymentLines(invoiceId, invoiceType, include_opposing_direction?)` —
+  the candidate picker for the "Assign payment" button. Returns lines
+  where `line_type = general`, all document links are NULL, parent
+  payment is not reconciled or soft-deleted, and currency is compatible
+  with the invoice currency under the rule below. **By default filters
+  to direction-matched candidates** (inbound payments for outgoing
+  invoices, outbound payments for incoming invoices) because that is
+  the normal case. The `include_opposing_direction` flag unlocks
+  opposing-direction candidates for the refund / self-detracción UX.
+  The server action accepts linking any direction regardless of this
+  flag; the flag is purely a picker convenience.
 - `getUnlinkedPaymentLines(filters?)` — month-end cleanup view. Returns
   all `line_type = general` lines with no document links, optionally
   filtered by parent payment `direction`, `contact_id`,
@@ -648,79 +712,89 @@ up — the helper and migration are enough to unblock it.
   operation for the payment-first cost flow. Creates a new
   `incoming_invoice` with `factura_status = expected` (SUNAT fields
   nullable) then links the existing payment line to it via the same
-  bucket-targeted auto-split logic as `linkPaymentLineToInvoice`. One
-  atomic call — either both sides succeed or neither does. Used when
-  Alex pays a vendor before the factura arrives; the expected invoice
-  shows up on the chase list until the real factura comes in and is
-  transitioned to `received`.
+  `linkPaymentLineToInvoice` logic (including auto-split on overflow).
+  One atomic call — either both sides succeed or neither does. Used
+  when Alex pays a vendor before the factura arrives; the expected
+  invoice shows up on the chase list until the real factura comes in
+  and is transitioned to `received`.
 
 **Currency rule.** A payment line's parent payment currency must match
-the invoice currency, with exactly one exception: **a PEN payment from a
-Banco de la Nación account with `is_detraction = true` may link to a USD
-invoice.** This is the "detracción on a USD invoice" scenario —
-detracciones are always in PEN even when the underlying invoice is in
-USD. Enforced by `validatePaymentInvoiceCurrency` and called from
-`createPayment` (for lines created with an invoice link),
-`linkPaymentLineToInvoice`, `splitPaymentLine` (for splits that gain an
-invoice link), and `createExpectedInvoiceFromPaymentLine`.
+the invoice currency, with exactly one exception: **a PEN payment from
+a Banco de la Nación account (`is_detraction = true` by server
+derivation) may link to a USD invoice.** This is the "detracción on a
+USD invoice" scenario — detracciones are always in PEN even when the
+underlying invoice is in USD. Enforced by `validatePaymentInvoiceCurrency`
+and called from `createPayment` (for lines created with an invoice
+link), `linkPaymentLineToInvoice`, `splitPaymentLine` (for splits that
+gain an invoice link), and `createExpectedInvoiceFromPaymentLine`.
 
-**Auto-split bucket targeting (outgoing invoices only).** Outgoing
-invoices split receivables into a regular portion and a BN (detracción)
-portion. The auto-split logic respects the buckets: a non-detracción
-payment line can only fill `outstanding_regular`, and a detracción
-payment line can only fill `outstanding_bn`. A line that exceeds its
-target bucket is split even when the invoice's total outstanding would
-have absorbed it, because the two buckets represent genuinely different
-real-world receivables (regular cash vs. tax-restricted BN funds).
-Incoming invoices use a single outstanding value
-(`total_pen − SUM(payment_lines.amount_pen)`).
+**Direction is UI-only.** The picker defaults to direction-matched
+candidates because that is the 99% case. The server accepts links of
+any direction, which is what makes refunds and self-detracción history
+work naturally. There is **no server-side enforcement** of direction
+matching.
 
-**Lifecycle additions.** `lib/lifecycle.ts` gains a parallel state
-machine for `outgoing_invoice.detraction_status`:
-
-```
-detraction_status:
-  pending → received         # client deposited to BN normally
-  pending → autodetracted    # Alex fronted the BN deposit himself
-  # not_applicable, received, autodetracted are terminal
-```
-
-`updateOutgoingInvoice` enforces the machine when the field is touched.
-No payment-level state machine — reconciliation remains a boolean flag,
-managed in Step 11.
+**No lifecycle additions.** `detraction_status` on outgoing invoices
+remains a plain mutable column with no state machine. The accountant
+sets it directly via `updateOutgoingInvoice`; no transition gates, no
+parallel state machine in `lib/lifecycle.ts`. Reconciliation remains a
+boolean flag, managed in Step 11.
 
 **Validators in `lib/validators/payments.ts`:**
 
-- Extend `validateCreatePayment` to require and validate a non-empty
-  `lines` array.
-- Add `validatePaymentInvoiceCurrency(payment, invoice)` — the currency
-  rule above.
-- Add `validateSplitSumToOriginal(originalAmount, splits)` — split
-  amounts must sum exactly (within tolerance) to the original line
-  amount.
+- Extend `validateCreatePayment(data, lines)` to require and validate
+  a non-empty `lines` array (each line runs through `validatePaymentLine`
+  with field errors scoped to `lines[i].field`).
+- Simplify `validateBankAccountConsistency` — keep the "BN accounts
+  must be PEN" check only; the `is_detraction = true` half becomes
+  structurally guaranteed by server-side derivation.
+- Add `validatePaymentInvoiceCurrency(paymentCurrency, invoiceCurrency,
+  isDetraction, bankAccountType)` — the currency rule above, as a pure
+  function.
+- Add `validateSplitSumToOriginal(originalAmount, originalAmountPen,
+  splits)` — split amounts must sum exactly (within tolerance) to the
+  original line on both `amount` and `amount_pen`.
 - Add `validatePaymentMutable(payment)` — rejects any mutation when
   `reconciled = true`.
-- Add an immutable-fields guard on `updatePayment` — rejects changes to
+- Add `validateUpdatePayment(patch, existing)` — rejects changes to
   `direction`, `bank_account_id`, `currency`, `exchange_rate`,
   `is_detraction`.
-- **Delete `validateNoOverAllocation`** — over-allocation is
-  structurally impossible under the bucket-targeted auto-split logic
-  (the auto-split is the enforcement).
+- **Delete `validateNoOverAllocation`** — incompatible with the
+  signed formula (a negative-direction line is "over-allocated" under
+  the old definition). Overpayment on a positive-direction link is
+  now handled by auto-split.
 
 **Outgoing invoice status is workflow-only** and never touched by
 payment line mutations. The `_computed.payment_state` field is derived
-at query time from the sum of linked `payment_lines.amount_pen` vs
-`total_pen`, mirroring the same derivation used for incoming invoices.
-Both document types follow the two-dimensional model: workflow status
-on the row, payment progress under `_computed`. See
-`api-design-principles.md` → "Formulas" for the canonical computations.
+at query time from the signed sum of linked `payment_lines.amount_pen`,
+using the same formula as incoming invoices. Both document types
+follow the two-dimensional model: workflow status on the row, payment
+progress under `_computed`. See `api-design-principles.md` →
+"Formulas" for the canonical computations.
+
+**`_computed` shape (single-bucket):**
+
+```typescript
+// Both invoice sides
+{
+  payment_state: "unpaid" | "partially_paid" | "paid";
+  paid: number;
+  outstanding: number;
+  is_fully_paid: boolean;
+  // outgoing only, orthogonal to payment math:
+  sunat_state?: "not_submitted" | "pending" | "accepted" | "rejected";
+  // incoming only, orthogonal to payment math:
+  needs_factura?: boolean;
+}
+```
 
 **Commit sequence:**
 
-1. `docs: step 10 — rewrite payments section to match confirmed workflow`
-2. `feat: types and validators — payment inputs, currency rule, lifecycle`
-3. `feat: payments and payment lines — CRUD, split, link, expected-invoice flow`
-4. `test: payments server actions end-to-end`
+1. `docs: step 10 — replace bucket design with single-bucket signed-formula model`
+2. `feat: validators — payment input/line/currency/split/mutable rules`
+3. `refactor: invoice computed helpers — single-bucket signed formula`
+4. `feat: payments and payment lines — CRUD, split, link, expected-invoice flow`
+5. `test: payments server actions end-to-end`
 
 ---
 

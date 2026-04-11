@@ -543,13 +543,14 @@ progress or SUNAT registration. Both are derived at query time and returned
 under `_computed` on every outgoing invoice response:
 
 - `_computed.payment_state` — `unpaid | partially_paid | paid`, derived from
-  the sum of linked `payment_lines.amount_pen` vs `total_pen`.
+  the signed sum of linked `payment_lines.amount_pen` vs `total_pen`. See
+  `api-design-principles.md` → "Invoice payment progress" for the canonical
+  direction-signed formula.
 - `_computed.sunat_state` — `not_submitted | pending | accepted | rejected`,
   derived from the `estado_sunat` column.
-- `_computed.paid_regular`, `paid_bn`, `outstanding_regular`, `outstanding_bn`,
-  `is_fully_paid` — split across regular receivables and Banco de la Nación
-  receivables (the detracción portion). See `api-design-principles.md` for the
-  canonical formulas.
+- `_computed.paid`, `outstanding`, `is_fully_paid` — single-bucket derived
+  fields from the same formula. No regular/BN receivable split: detraccíon
+  columns remain as informational reference data, not as separate buckets.
 
 ### `outgoing_invoice_line_items`
 
@@ -962,21 +963,29 @@ ORDER BY total_spent DESC
 -- lines does not exist. Linkability is a property of individual lines,
 -- not of payment headers.
 --
--- The mirror query for incoming invoices uses p.direction = 2 and
--- swaps outgoing_invoice_id for incoming_invoice_id in the exclusivity
--- check.
+-- The direction filter is a UI convenience, not a server rule. The
+-- default picker shows direction-matched candidates (inbound for
+-- outgoing invoices, outbound for incoming) because that is the 99%
+-- case. Passing include_opposing_direction = true drops the direction
+-- predicate so refunds and self-detracción legs can be picked. The
+-- server action accepts links of any direction regardless.
+--
+-- The mirror query for incoming invoices swaps outgoing_invoice_id for
+-- incoming_invoice_id in the exclusivity check and defaults to
+-- p.direction = 2 (outbound).
 SELECT
   pl.id, pl.amount, pl.amount_pen, pl.notes,
   p.id AS payment_id, p.payment_date, p.bank_reference,
-  p.contact_id, p.currency AS payment_currency, p.is_detraction
+  p.contact_id, p.currency AS payment_currency, p.is_detraction,
+  p.direction
 FROM payment_lines pl
 JOIN payments p ON p.id = pl.payment_id AND p.deleted_at IS NULL
 WHERE pl.line_type = 5                            -- general
   AND pl.outgoing_invoice_id IS NULL
   AND pl.incoming_invoice_id IS NULL
   AND pl.loan_id IS NULL
-  AND p.direction = 1                             -- inbound (for outgoing invoice)
   AND p.reconciled = false
+  AND (:include_opposing_direction OR p.direction = 1)  -- default: inbound only
   AND (p.contact_id = :invoice_contact_id OR p.contact_id IS NULL)
   -- Currency rule: payment.currency = invoice.currency OR
   -- (payment is a PEN detracción on a USD invoice)
@@ -987,18 +996,32 @@ WHERE pl.line_type = 5                            -- general
 ORDER BY p.payment_date DESC
 ```
 
-**Invoice outstanding:**
+**Invoice outstanding (signed single-bucket formula):**
 ```sql
+-- Outgoing invoice: positive = money toward Korakuen
 SELECT
   oi.total_pen,
-  COALESCE(SUM(pl.amount_pen), 0)           AS total_paid,
-  oi.total_pen - COALESCE(SUM(pl.amount_pen), 0) AS outstanding
+  COALESCE(SUM(
+    CASE WHEN p.direction = 1 THEN  pl.amount_pen
+         WHEN p.direction = 2 THEN -pl.amount_pen
+    END
+  ), 0)                                                      AS paid,
+  GREATEST(oi.total_pen - COALESCE(SUM(
+    CASE WHEN p.direction = 1 THEN  pl.amount_pen
+         WHEN p.direction = 2 THEN -pl.amount_pen
+    END
+  ), 0), 0)                                                  AS outstanding
 FROM outgoing_invoices oi
 LEFT JOIN payment_lines pl ON pl.outgoing_invoice_id = oi.id
 LEFT JOIN payments p ON p.id = pl.payment_id AND p.deleted_at IS NULL
 WHERE oi.id = :invoice_id
 GROUP BY oi.id, oi.total_pen
 ```
+
+The mirror query for incoming invoices flips the sign (direction = 2 is
+positive, direction = 1 is negative) to reflect that money flows toward
+the vendor. Both formulas handle refunds, self-detracciones, and
+transfers naturally because the direction column carries the semantics.
 
 **S/100 invoice + S/4 bank fee example:**
 ```sql
@@ -1306,36 +1329,45 @@ These cannot be expressed as CHECK constraints and are enforced in application c
    `exchange_rate` is required. Engine validates:
    `detraction_amount ≈ total × detraction_rate × exchange_rate`.
 
-6. **BN payment = detraction:** Any payment on a `banco_de_la_nacion` account
-   must have `is_detraction = true`.
+6. **BN payment = detraction (auto-derived):** Any payment on a
+   `banco_de_la_nacion` account has `is_detraction = true`. The server
+   sets this flag from `bank_account.account_type` at `createPayment`
+   time; user-supplied values are ignored. `bank_account_id` is
+   immutable, so `is_detraction` is structurally immutable too.
 
-7. **Autodetracción:** Setting `detraction_status = 4` on an outgoing invoice requires
-   at least one payment line with `line_type = 3` linked to that invoice via a BN payment.
+7. **Payment line positive-overflow auto-split:** When linking a payment
+   line to an invoice, if the line's signed contribution is **positive**
+   and its `amount_pen` exceeds the invoice's remaining outstanding
+   (`total_pen - current_paid`), the engine atomically splits the line
+   into two siblings: Part A fills the outstanding exactly and takes
+   the invoice link (`line_type = invoice`); Part B holds the remainder
+   as a fresh `line_type = general` line with no link. Negative-direction
+   contributions never split — they are refunds or self-detracción legs
+   where the full amount is preserved as history. This replaces the
+   pre-Step-10 over-allocation rejection; over-allocation is structurally
+   impossible under auto-split.
 
-8. **Payment line over-allocation block:** Engine prevents adding a payment line
-   whose amount would cause the invoice's total paid to exceed `invoice.total_pen`.
-   Returns `422`.
-
-9. **Payment header total:** `payments.total_amount` must always equal
+8. **Payment header total:** `payments.total_amount` must always equal
    `SUM(payment_lines.amount)`. Engine recomputes atomically after every line mutation.
 
-10. **Bank fee lines never link to documents:** `line_type = 2` lines must have
-    `outgoing_invoice_id`, `incoming_invoice_id`, and `loan_id` all null. Enforced
-    by DB constraint `pl_bank_fee_no_invoice` and engine validation.
+9. **Bank fee lines never link to documents:** `line_type = 2` lines must have
+   `outgoing_invoice_id`, `incoming_invoice_id`, and `loan_id` all null. Enforced
+   by DB constraint `pl_bank_fee_no_invoice` and engine validation.
 
-11. **Reconciliation immutability:** Payment lines on reconciled payments
+10. **Reconciliation immutability:** Payment lines on reconciled payments
     (`payments.reconciled = true`) cannot be added, edited, or deleted.
+    Payment-header mutations are also blocked when `reconciled = true`.
 
-12. **Line item / header consistency:** Before a document leaves draft, the engine
+11. **Line item / header consistency:** Before a document leaves draft, the engine
     validates `SUM(line_items.total) = header.total` (±S/0.01).
 
-13. **Incoming invoice dual mode:** Header-only OR line items — not both simultaneously.
+12. **Incoming invoice dual mode:** Header-only OR line items — not both simultaneously.
     Once line items exist, header totals become read-only.
 
-14. **Submission promotion uniqueness:** A submission can only be approved once.
+13. **Submission promotion uniqueness:** A submission can only be approved once.
     Re-approving after `resulting_record_id` is set returns `409 CONFLICT`.
 
-15. **Outgoing invoice status is workflow-only.** The `status` column carries
+14. **Outgoing invoice status is workflow-only.** The `status` column carries
     only `draft | sent | void`. Payment progress and SUNAT registration are
     each derived at query time from payment_lines and the `estado_sunat`
     column respectively, returned under `_computed.payment_state` and
