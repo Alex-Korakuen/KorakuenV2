@@ -951,28 +951,40 @@ GROUP BY cc.name
 ORDER BY total_spent DESC
 ```
 ```sql
--- Payments that can be linked to a given invoice
--- Filter: same contact OR no contact registered. Different contact = hard block.
+-- Linkable payment lines for a given outgoing invoice
+-- Powers getLinkablePaymentLines — returns general-type lines with no
+-- document link that could be assigned to this invoice via
+-- linkPaymentLineToInvoice. Reconciled payments are excluded because
+-- their lines are locked.
+--
+-- There is no "unallocated payment balance" concept: total_amount is
+-- always the sum of payment_lines, so a payment with "room" for more
+-- lines does not exist. Linkability is a property of individual lines,
+-- not of payment headers.
+--
+-- The mirror query for incoming invoices uses p.direction = 2 and
+-- swaps outgoing_invoice_id for incoming_invoice_id in the exclusivity
+-- check.
 SELECT
-  p.id, p.total_amount_pen, p.payment_date, p.contact_id,
-  -- available = total payment minus what's already allocated to other invoices
-  p.total_amount_pen - COALESCE(SUM(pl.amount_pen) FILTER (
-    WHERE pl.outgoing_invoice_id IS NOT NULL
-       OR pl.incoming_invoice_id IS NOT NULL
-  ), 0) AS available_amount
-FROM payments p
-LEFT JOIN payment_lines pl ON pl.payment_id = p.id
-WHERE p.direction = :expected_direction
-  AND p.deleted_at IS NULL
+  pl.id, pl.amount, pl.amount_pen, pl.notes,
+  p.id AS payment_id, p.payment_date, p.bank_reference,
+  p.contact_id, p.currency AS payment_currency, p.is_detraction
+FROM payment_lines pl
+JOIN payments p ON p.id = pl.payment_id AND p.deleted_at IS NULL
+WHERE pl.line_type = 5                            -- general
+  AND pl.outgoing_invoice_id IS NULL
+  AND pl.incoming_invoice_id IS NULL
+  AND pl.loan_id IS NULL
+  AND p.direction = 1                             -- inbound (for outgoing invoice)
+  AND p.reconciled = false
+  AND (p.contact_id = :invoice_contact_id OR p.contact_id IS NULL)
+  -- Currency rule: payment.currency = invoice.currency OR
+  -- (payment is a PEN detracción on a USD invoice)
   AND (
-    p.contact_id = :invoice_contact_id
-    OR p.contact_id IS NULL
+    p.currency = :invoice_currency
+    OR (p.is_detraction = true AND p.currency = 'PEN' AND :invoice_currency = 'USD')
   )
-GROUP BY p.id, p.total_amount_pen, p.payment_date, p.contact_id
-HAVING p.total_amount_pen - COALESCE(SUM(pl.amount_pen) FILTER (
-    WHERE pl.outgoing_invoice_id IS NOT NULL
-       OR pl.incoming_invoice_id IS NOT NULL
-  ), 0) > 0
+ORDER BY p.payment_date DESC
 ```
 
 **Invoice outstanding:**

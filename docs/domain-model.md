@@ -548,14 +548,20 @@ is_active             — boolean
 
 ```
 1. Supplier delivers materials, payment made on the spot
-2. Payment recorded immediately: outbound, bank account
-   paid_by_partner_id = paying partner
-3. Payment form prompts "No factura linked — create an expected invoice?"
-   Expected invoice created, pre-filled from the payment (vendor, amount, project)
-4. Payment line linked: incoming_invoice_id = the new expected invoice
-5. Invoice is now (expected, paid) — on the chase list
-6. Supplier sends factura later → transition to received, SUNAT fields populated
-7. Invoice is now (received, paid) — fully closed
+2. Payment recorded immediately: outbound, bank account,
+   paid_by_partner_id = paying partner. At this stage the line is a
+   general expense with no invoice link — the factura doesn't exist yet.
+3. From the payment detail menu, Alex clicks "Create expected invoice
+   from this line". One atomic server action
+   (createExpectedInvoiceFromPaymentLine) both creates a new
+   incoming_invoice with factura_status = expected (pre-filled from the
+   payment: vendor, amount, project) and flips the payment line from
+   general to invoice with incoming_invoice_id pointing at the new
+   expected invoice. These never happen as two separate steps.
+4. Invoice is now (expected, paid) — on the chase list
+5. Supplier sends factura later → transition to received, SUNAT fields
+   populated
+6. Invoice is now (received, paid) — fully closed
 ```
 
 ### Cost flow — announcement-first (vendor pre-warns a bill)
