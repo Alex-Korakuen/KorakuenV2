@@ -1,6 +1,7 @@
 import { requireAdmin } from "@/lib/auth";
 import { ExchangeRateBanner } from "@/components/exchange-rate-banner";
-import { LogoutButton } from "@/components/logout-button";
+import { Sidebar } from "@/components/app-shell/sidebar";
+import { TopBar } from "@/components/app-shell/top-bar";
 
 export default async function AdminLayout({
   children,
@@ -10,19 +11,21 @@ export default async function AdminLayout({
   const user = await requireAdmin();
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="flex items-center justify-between border-b bg-white px-6 py-3">
-        <div className="flex items-center gap-4">
-          <span className="text-lg font-bold">Korakuen</span>
-          <span className="text-sm text-gray-500">Administrador</span>
-        </div>
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-gray-600">{user.email}</span>
-          <LogoutButton />
-        </div>
-      </header>
-      <ExchangeRateBanner variant="admin" />
-      <main className="p-6">{children}</main>
+    <div className="flex min-h-screen bg-slate-50">
+      <Sidebar
+        variant="admin"
+        user={{
+          displayName: user.display_name ?? user.email,
+          email: user.email,
+        }}
+      />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <TopBar variant="admin" />
+        <ExchangeRateBanner variant="admin" />
+        <main className="flex-1 overflow-y-auto px-6 py-8">
+          <div className="mx-auto max-w-7xl">{children}</div>
+        </main>
+      </div>
     </div>
   );
 }

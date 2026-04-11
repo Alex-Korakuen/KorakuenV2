@@ -1,6 +1,7 @@
 import { requirePartner } from "@/lib/auth";
 import { ExchangeRateBanner } from "@/components/exchange-rate-banner";
-import { LogoutButton } from "@/components/logout-button";
+import { Sidebar } from "@/components/app-shell/sidebar";
+import { TopBar } from "@/components/app-shell/top-bar";
 
 export default async function PartnerLayout({
   children,
@@ -10,21 +11,21 @@ export default async function PartnerLayout({
   const user = await requirePartner();
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="flex items-center justify-between border-b bg-white px-6 py-3">
-        <div className="flex items-center gap-4">
-          <span className="text-lg font-bold">Korakuen</span>
-          <span className="text-sm text-gray-500">Socio</span>
-        </div>
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-gray-600">
-            {user.display_name ?? user.email}
-          </span>
-          <LogoutButton />
-        </div>
-      </header>
-      <ExchangeRateBanner variant="partner" />
-      <main className="p-6">{children}</main>
+    <div className="flex min-h-screen bg-slate-50">
+      <Sidebar
+        variant="partner"
+        user={{
+          displayName: user.display_name ?? user.email,
+          email: user.email,
+        }}
+      />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <TopBar variant="partner" />
+        <ExchangeRateBanner variant="partner" />
+        <main className="flex-1 overflow-y-auto px-6 py-8">
+          <div className="mx-auto max-w-7xl">{children}</div>
+        </main>
+      </div>
     </div>
   );
 }
