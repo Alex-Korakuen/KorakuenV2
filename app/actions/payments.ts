@@ -35,12 +35,15 @@ import { validateIncomingInvoice } from "@/lib/validators/invoices";
 import { requireExactExchangeRate } from "@/lib/exchange-rate";
 import { computeOutgoingInvoicePaymentProgress } from "@/lib/outgoing-invoice-computed";
 import { computeIncomingInvoicePaymentProgress } from "@/lib/incoming-invoice-computed";
+import {
+  signedContributionForInvoice,
+  autoSplitOnOverflow,
+  type InvoiceType,
+} from "@/lib/payment-helpers";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-type InvoiceType = "outgoing" | "incoming";
 
 type PaymentFilters = {
   project_id?: string;
@@ -128,69 +131,6 @@ type UnlinkedPaymentLineFilters = {
 
 function deriveIsDetraction(bankAccount: BankAccountRow): boolean {
   return bankAccount.account_type === ACCOUNT_TYPE.banco_de_la_nacion;
-}
-
-function signedContributionForInvoice(
-  paymentDirection: number,
-  amountPen: number,
-  invoiceType: InvoiceType,
-): number {
-  if (invoiceType === "outgoing") {
-    if (paymentDirection === PAYMENT_DIRECTION.inbound) return amountPen;
-    if (paymentDirection === PAYMENT_DIRECTION.outbound) return -amountPen;
-    return 0;
-  }
-  if (paymentDirection === PAYMENT_DIRECTION.outbound) return amountPen;
-  if (paymentDirection === PAYMENT_DIRECTION.inbound) return -amountPen;
-  return 0;
-}
-
-type AutoSplitDecision =
-  | { kind: "no_split" }
-  | {
-      kind: "split";
-      fillAmount: number;
-      fillAmountPen: number;
-      remainderAmount: number;
-      remainderAmountPen: number;
-    };
-
-/**
- * Decide whether linking `line` to an invoice should auto-split it into
- * a "fill exactly" part and a "remainder as general line" part. Triggers
- * only when the contribution is positive-direction AND the line overflows
- * the invoice's remaining outstanding. Negative-direction contributions
- * (refunds, self-detracción legs) never split — their full amount is
- * preserved as history.
- *
- * Pure function — no DB access.
- */
-function autoSplitOnOverflow(
-  line: Pick<PaymentLineRow, "amount" | "amount_pen">,
-  invoiceTotalPen: number,
-  currentPaid: number,
-  signedContribution: number,
-): AutoSplitDecision {
-  if (signedContribution <= 0) return { kind: "no_split" };
-  const remaining = invoiceTotalPen - currentPaid;
-  if (remaining <= 0) return { kind: "no_split" };
-  if (line.amount_pen <= remaining) return { kind: "no_split" };
-
-  const fillAmountPen = Math.round(remaining * 100) / 100;
-  const remainderAmountPen =
-    Math.round((line.amount_pen - fillAmountPen) * 100) / 100;
-  const ratio = fillAmountPen / line.amount_pen;
-  const fillAmount = Math.round(line.amount * ratio * 100) / 100;
-  // Exact subtraction preserves fill + remainder = original
-  const remainderAmount = Math.round((line.amount - fillAmount) * 100) / 100;
-
-  return {
-    kind: "split",
-    fillAmount,
-    fillAmountPen,
-    remainderAmount,
-    remainderAmountPen,
-  };
 }
 
 function computeLineTotals(lines: CreatePaymentLineInput[]): {
