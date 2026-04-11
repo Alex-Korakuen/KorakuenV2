@@ -11,22 +11,24 @@ import type {
   CreatePaymentInput,
   CreatePaymentLineInput,
   BankAccountRow,
+  PaymentRow,
 } from "@/lib/types";
-import { validateCurrencyExchangeRate } from "./shared";
+import { validateCurrencyExchangeRate, validateImmutableFields } from "./shared";
 
 // ---------------------------------------------------------------------------
-// Payment header validation
+// Payment header + lines validation
 // ---------------------------------------------------------------------------
 
 /**
- * Validate data for creating a payment.
+ * Validate a payment header together with its lines. createPayment requires
+ * a non-empty lines array; line errors are scoped to `lines[i].field`.
  */
 export function validateCreatePayment(
   data: CreatePaymentInput,
-): ValidationResult<CreatePaymentInput> {
+  lines: CreatePaymentLineInput[],
+): ValidationResult<{ data: CreatePaymentInput; lines: CreatePaymentLineInput[] }> {
   const fields: Record<string, string> = {};
 
-  // Direction must be valid
   if (
     data.direction !== PAYMENT_DIRECTION.inbound &&
     data.direction !== PAYMENT_DIRECTION.outbound
@@ -34,55 +36,61 @@ export function validateCreatePayment(
     fields.direction = "Must be 1 (inbound) or 2 (outbound)";
   }
 
-  // Bank account is required
   if (!data.bank_account_id) {
     fields.bank_account_id = "Required";
   }
 
-  // Currency validation
   Object.assign(fields, validateCurrencyExchangeRate(data.currency, data.exchange_rate));
-  const currency = data.currency ?? "PEN";
 
   // paid_by_partner_id only allowed on outbound (DB constraint: pay_direction_partner)
   if (data.paid_by_partner_id && data.direction !== PAYMENT_DIRECTION.outbound) {
     fields.paid_by_partner_id = "Only allowed on outbound payments";
   }
 
-  // is_detraction requires PEN (DB constraint: pay_bn_detraction)
-  if (data.is_detraction && currency !== "PEN") {
-    fields.is_detraction = "Detraction payments must be in PEN";
-  }
-
-  // Payment date is required
   if (!data.payment_date) {
     fields.payment_date = "Required";
   }
 
   if (Object.keys(fields).length > 0) {
-    return failure("VALIDATION_ERROR", "Payment validation failed", fields);
+    return failure("VALIDATION_ERROR", "Payment header validation failed", fields);
   }
 
-  return success(data);
+  if (lines.length === 0) {
+    return failure("VALIDATION_ERROR", "At least one payment line is required", {
+      lines: "Empty line list",
+    });
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const check = validatePaymentLine(lines[i]);
+    if (!check.success) {
+      const scoped: Record<string, string> = {};
+      for (const [k, v] of Object.entries(check.error.fields ?? {})) {
+        scoped[`lines[${i}].${k}`] = v;
+      }
+      return failure(check.error.code, check.error.message, scoped);
+    }
+  }
+
+  return success({ data, lines });
 }
 
 // ---------------------------------------------------------------------------
 // Payment line validation
 // ---------------------------------------------------------------------------
 
-/**
- * Validate a single payment line.
- */
 export function validatePaymentLine(
   line: CreatePaymentLineInput,
 ): ValidationResult<CreatePaymentLineInput> {
   const fields: Record<string, string> = {};
 
-  // Amount must be positive (DB constraint: pl_positive)
   if (line.amount <= 0) {
     fields.amount = "Must be greater than 0";
   }
+  if (line.amount_pen <= 0) {
+    fields.amount_pen = "Must be greater than 0";
+  }
 
-  // At most one document link (DB constraint: pl_invoice_exclusive)
   const docLinks = [
     line.outgoing_invoice_id,
     line.incoming_invoice_id,
@@ -94,18 +102,15 @@ export function validatePaymentLine(
       "At most one of outgoing_invoice_id, incoming_invoice_id, loan_id can be set";
   }
 
-  // Bank fee lines cannot link to documents (DB constraint: pl_bank_fee_no_invoice)
   if (line.line_type === PAYMENT_LINE_TYPE.bank_fee && docLinks.length > 0) {
     fields.line_type =
       "Bank fee lines (line_type=2) cannot link to invoices or loans";
   }
 
-  // Loan lines must have loan_id (DB constraint: pl_loan_type)
   if (line.line_type === PAYMENT_LINE_TYPE.loan && !line.loan_id) {
     fields.loan_id = "Required when line_type is loan (4)";
   }
 
-  // line_type must be valid
   const validLineTypes = Object.values(PAYMENT_LINE_TYPE);
   if (!validLineTypes.includes(line.line_type as typeof validLineTypes[number])) {
     fields.line_type = `Must be one of: ${validLineTypes.join(", ")}`;
@@ -123,32 +128,25 @@ export function validatePaymentLine(
 // ---------------------------------------------------------------------------
 
 /**
- * Validate that a payment is consistent with its target bank account.
- * Banco de la Nacion accounts enforce PEN currency and is_detraction = true.
+ * Banco de la Nación accounts only accept PEN payments. The is_detraction
+ * half of the old check is now structural — the server derives the flag
+ * from bank_account.account_type at createPayment time, so it cannot
+ * disagree with the account.
  */
 export function validateBankAccountConsistency(
   payment: CreatePaymentInput,
   bankAccount: BankAccountRow,
 ): ValidationResult<void> {
-  const fields: Record<string, string> = {};
-
-  if (bankAccount.account_type === ACCOUNT_TYPE.banco_de_la_nacion) {
-    const currency = payment.currency ?? "PEN";
-    if (currency !== "PEN") {
-      fields.currency =
-        "Banco de la Nacion accounts only accept PEN payments";
-    }
-    if (!payment.is_detraction) {
-      fields.is_detraction =
-        "Payments to/from Banco de la Nacion must be marked as detraction";
-    }
+  if (bankAccount.account_type !== ACCOUNT_TYPE.banco_de_la_nacion) {
+    return success(undefined);
   }
 
-  if (Object.keys(fields).length > 0) {
+  const currency = payment.currency ?? "PEN";
+  if (currency !== "PEN") {
     return failure(
       "VALIDATION_ERROR",
       "Payment is inconsistent with bank account rules",
-      fields,
+      { currency: "Banco de la Nacion accounts only accept PEN payments" },
     );
   }
 
@@ -156,60 +154,136 @@ export function validateBankAccountConsistency(
 }
 
 // ---------------------------------------------------------------------------
-// Payment totals
+// Currency rule (payment line linked to an invoice)
 // ---------------------------------------------------------------------------
 
 /**
- * Validate that payment header totals match the sum of payment lines.
+ * A payment line's parent payment currency must match the invoice currency,
+ * with exactly one exception: a PEN payment from a Banco de la Nación
+ * account (is_detraction = true) may link to a USD invoice. Detracciones
+ * are always deposited in PEN even when the underlying invoice is in USD.
  */
-export function validatePaymentTotals(
-  totalAmount: number,
-  totalAmountPen: number,
-  lines: CreatePaymentLineInput[],
+export function validatePaymentInvoiceCurrency(
+  paymentCurrency: string,
+  invoiceCurrency: string,
+  isDetraction: boolean,
+  bankAccountType: number,
 ): ValidationResult<void> {
-  const fields: Record<string, string> = {};
-
-  const sumAmount = lines.reduce((acc, l) => acc + l.amount, 0);
-  const sumAmountPen = lines.reduce((acc, l) => acc + l.amount_pen, 0);
-
-  if (!withinTolerance(totalAmount, sumAmount)) {
-    fields.total_amount =
-      `Header total_amount (${totalAmount.toFixed(2)}) does not match lines sum (${sumAmount.toFixed(2)})`;
+  if (paymentCurrency === invoiceCurrency) {
+    return success(undefined);
   }
 
-  if (!withinTolerance(totalAmountPen, sumAmountPen)) {
-    fields.total_amount_pen =
-      `Header total_amount_pen (${totalAmountPen.toFixed(2)}) does not match lines sum (${sumAmountPen.toFixed(2)})`;
+  const isBnDetractionException =
+    paymentCurrency === "PEN" &&
+    invoiceCurrency === "USD" &&
+    isDetraction === true &&
+    bankAccountType === ACCOUNT_TYPE.banco_de_la_nacion;
+
+  if (isBnDetractionException) {
+    return success(undefined);
+  }
+
+  return failure(
+    "VALIDATION_ERROR",
+    "Payment currency does not match invoice currency",
+    {
+      currency: `Payment is ${paymentCurrency} but invoice is ${invoiceCurrency}. The only allowed cross-currency link is a PEN detracción from a Banco de la Nación account against a USD invoice.`,
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Split sum rule
+// ---------------------------------------------------------------------------
+
+/**
+ * When splitting a payment line into N siblings, the split amounts must sum
+ * exactly to the original on both `amount` and `amount_pen` (within tolerance).
+ */
+export function validateSplitSumToOriginal(
+  originalAmount: number,
+  originalAmountPen: number,
+  splits: Array<{ amount: number; amount_pen: number }>,
+): ValidationResult<void> {
+  if (splits.length < 1) {
+    return failure("VALIDATION_ERROR", "Split must produce at least one line", {
+      splits: "Empty split list",
+    });
+  }
+
+  const sumAmount = splits.reduce((acc, s) => acc + s.amount, 0);
+  const sumAmountPen = splits.reduce((acc, s) => acc + s.amount_pen, 0);
+
+  const fields: Record<string, string> = {};
+  if (!withinTolerance(originalAmount, sumAmount)) {
+    fields.amount = `Split sum (${sumAmount.toFixed(2)}) does not match original line amount (${originalAmount.toFixed(2)})`;
+  }
+  if (!withinTolerance(originalAmountPen, sumAmountPen)) {
+    fields.amount_pen = `Split sum in PEN (${sumAmountPen.toFixed(2)}) does not match original line amount_pen (${originalAmountPen.toFixed(2)})`;
   }
 
   if (Object.keys(fields).length > 0) {
-    return failure("VALIDATION_ERROR", "Payment totals do not match lines", fields);
+    return failure("VALIDATION_ERROR", "Split sum does not match original", fields);
   }
 
   return success(undefined);
 }
 
 // ---------------------------------------------------------------------------
-// Over-allocation check
+// Reconciliation gate
 // ---------------------------------------------------------------------------
 
 /**
- * Check that allocating a new amount to an invoice does not exceed the invoice total.
+ * Blocks any mutation against a reconciled payment. Used by every write
+ * action on payments and payment_lines.
  */
-export function validateNoOverAllocation(
-  invoiceTotal: number,
-  currentAllocated: number,
-  newAmount: number,
+export function validatePaymentMutable(
+  payment: Pick<PaymentRow, "reconciled">,
 ): ValidationResult<void> {
-  const afterAllocation = currentAllocated + newAmount;
-
-  if (afterAllocation > invoiceTotal + 0.01) {
+  if (payment.reconciled) {
     return failure(
-      "VALIDATION_ERROR",
-      "Allocation would exceed invoice total",
-      {
-        amount: `Invoice total: ${invoiceTotal.toFixed(2)}, already allocated: ${currentAllocated.toFixed(2)}, new: ${newAmount.toFixed(2)}, total after: ${afterAllocation.toFixed(2)}`,
-      },
+      "CONFLICT",
+      "Payment is reconciled and cannot be modified",
+      { reconciled: "Unreconcile the payment before editing" },
+    );
+  }
+  return success(undefined);
+}
+
+// ---------------------------------------------------------------------------
+// Payment header update guard (immutable fields)
+// ---------------------------------------------------------------------------
+
+const IMMUTABLE_PAYMENT_FIELDS: (keyof PaymentRow)[] = [
+  "direction",
+  "bank_account_id",
+  "currency",
+  "exchange_rate",
+  "is_detraction",
+];
+
+/**
+ * Rejects changes to fields that are immutable after creation. `is_detraction`
+ * is already structurally immutable (it derives from `bank_account_id`, which
+ * is also in this list), but we keep it here as belt-and-braces in case a
+ * caller tries to flip it directly.
+ */
+export function validateUpdatePayment(
+  patch: Record<string, unknown>,
+  existing: PaymentRow,
+): ValidationResult<void> {
+  const immutableErrors = validateImmutableFields<PaymentRow>(
+    patch,
+    IMMUTABLE_PAYMENT_FIELDS,
+    existing,
+  );
+
+  if (Object.keys(immutableErrors).length > 0) {
+    const field = Object.keys(immutableErrors)[0];
+    return failure(
+      "IMMUTABLE_FIELD",
+      `Field '${field}' cannot be changed after creation`,
+      immutableErrors,
     );
   }
 

@@ -20,8 +20,10 @@ export {
   validateCreatePayment,
   validatePaymentLine,
   validateBankAccountConsistency,
-  validatePaymentTotals,
-  validateNoOverAllocation,
+  validatePaymentInvoiceCurrency,
+  validateSplitSumToOriginal,
+  validatePaymentMutable,
+  validateUpdatePayment,
 } from "./payments";
 
 export {
