@@ -24,6 +24,8 @@ export {
   validateSplitSumToOriginal,
   validatePaymentMutable,
   validateUpdatePayment,
+  validateReconcilePayment,
+  validateUnreconcilePayment,
 } from "./payments";
 
 export {

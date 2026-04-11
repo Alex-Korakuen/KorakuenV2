@@ -7,6 +7,8 @@ import {
   validateSplitSumToOriginal,
   validatePaymentMutable,
   validateUpdatePayment,
+  validateReconcilePayment,
+  validateUnreconcilePayment,
 } from "../payments";
 import {
   PAYMENT_DIRECTION,
@@ -549,5 +551,120 @@ describe("validateUpdatePayment", () => {
       existing,
     );
     expect(result.success).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateReconcilePayment
+// ---------------------------------------------------------------------------
+
+describe("validateReconcilePayment", () => {
+  it("accepts an unreconciled payment with a non-empty reference", () => {
+    const result = validateReconcilePayment(
+      "TRF-20260411-001",
+      makePaymentRow({ reconciled: false }),
+    );
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.bankReference).toBe("TRF-20260411-001");
+    }
+  });
+
+  it("trims surrounding whitespace from the bank reference", () => {
+    const result = validateReconcilePayment(
+      "  TRF-001  ",
+      makePaymentRow({ reconciled: false }),
+    );
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.bankReference).toBe("TRF-001");
+    }
+  });
+
+  it("rejects an already-reconciled payment with CONFLICT", () => {
+    const result = validateReconcilePayment(
+      "TRF-001",
+      makePaymentRow({ reconciled: true }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe("CONFLICT");
+      expect(result.error.fields?.reconciled).toBeDefined();
+    }
+  });
+
+  it("rejects a soft-deleted payment with NOT_FOUND", () => {
+    const result = validateReconcilePayment(
+      "TRF-001",
+      makePaymentRow({ deleted_at: "2026-04-11T00:00:00Z" }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe("NOT_FOUND");
+    }
+  });
+
+  it("rejects an empty bank reference", () => {
+    const result = validateReconcilePayment("", makePaymentRow());
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+      expect(result.error.fields?.bank_reference).toBeDefined();
+    }
+  });
+
+  it("rejects a whitespace-only bank reference", () => {
+    const result = validateReconcilePayment("   ", makePaymentRow());
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+      expect(result.error.fields?.bank_reference).toBeDefined();
+    }
+  });
+
+  it("rejects a bank reference longer than 100 characters", () => {
+    const result = validateReconcilePayment("x".repeat(101), makePaymentRow());
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+      expect(result.error.fields?.bank_reference).toBeDefined();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateUnreconcilePayment
+// ---------------------------------------------------------------------------
+
+describe("validateUnreconcilePayment", () => {
+  it("accepts a reconciled payment", () => {
+    const result = validateUnreconcilePayment(
+      makePaymentRow({ reconciled: true }),
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects an unreconciled payment with CONFLICT", () => {
+    const result = validateUnreconcilePayment(
+      makePaymentRow({ reconciled: false }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe("CONFLICT");
+      expect(result.error.fields?.reconciled).toBeDefined();
+    }
+  });
+
+  it("rejects a soft-deleted payment with NOT_FOUND", () => {
+    const result = validateUnreconcilePayment(
+      makePaymentRow({
+        reconciled: true,
+        deleted_at: "2026-04-11T00:00:00Z",
+      }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe("NOT_FOUND");
+    }
   });
 });

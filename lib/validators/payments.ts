@@ -250,6 +250,67 @@ export function validatePaymentMutable(
   return success(undefined);
 }
 
+const BANK_REFERENCE_MAX_LENGTH = 100;
+
+export function validateReconcilePayment(
+  bankReference: string,
+  existing: Pick<PaymentRow, "reconciled" | "deleted_at">,
+): ValidationResult<{ bankReference: string }> {
+  if (existing.deleted_at) {
+    return failure("NOT_FOUND", "Payment not found");
+  }
+  if (existing.reconciled) {
+    return failure(
+      "CONFLICT",
+      "Payment is already reconciled",
+      { reconciled: "Use unreconcilePayment to revert first" },
+    );
+  }
+
+  if (typeof bankReference !== "string") {
+    return failure(
+      "VALIDATION_ERROR",
+      "Bank reference is required",
+      { bank_reference: "Bank reference is required" },
+    );
+  }
+  const trimmed = bankReference.trim();
+  if (trimmed.length === 0) {
+    return failure(
+      "VALIDATION_ERROR",
+      "Bank reference is required",
+      { bank_reference: "Bank reference is required" },
+    );
+  }
+  if (trimmed.length > BANK_REFERENCE_MAX_LENGTH) {
+    return failure(
+      "VALIDATION_ERROR",
+      "Bank reference is too long",
+      {
+        bank_reference: `Must be ${BANK_REFERENCE_MAX_LENGTH} characters or fewer`,
+      },
+    );
+  }
+
+  return success({ bankReference: trimmed });
+}
+
+export function validateUnreconcilePayment(
+  existing: Pick<PaymentRow, "reconciled" | "deleted_at">,
+): ValidationResult<void> {
+  if (existing.deleted_at) {
+    return failure("NOT_FOUND", "Payment not found");
+  }
+  if (!existing.reconciled) {
+    return failure(
+      "CONFLICT",
+      "Payment is not reconciled",
+      { reconciled: "Only reconciled payments can be unreconciled" },
+    );
+  }
+  return success(undefined);
+}
+
 // ---------------------------------------------------------------------------
 // Payment header update guard (immutable fields)
 // ---------------------------------------------------------------------------

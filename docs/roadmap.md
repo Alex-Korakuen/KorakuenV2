@@ -798,7 +798,7 @@ progress under `_computed`. See `api-design-principles.md` →
 
 ---
 
-### Step 11 — Bank Reconciliation
+### Step 11 — Bank Reconciliation ✅
 
 - `getUnreconciled(bankAccountId)` — payments with `reconciled = false`
 - `reconcilePayment(id, bankReference)` — marks reconciled, stamps

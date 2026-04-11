@@ -30,6 +30,8 @@ import {
   validateSplitSumToOriginal,
   validatePaymentMutable,
   validateUpdatePayment,
+  validateReconcilePayment,
+  validateUnreconcilePayment,
 } from "@/lib/validators/payments";
 import { validateIncomingInvoice } from "@/lib/validators/invoices";
 import { requireExactExchangeRate } from "@/lib/exchange-rate";
@@ -1415,4 +1417,137 @@ export async function createExpectedInvoiceFromPaymentLine(
   }
 
   return linkResult;
+}
+
+// ---------------------------------------------------------------------------
+// Reconciliation — queue, reconcile, unreconcile
+// ---------------------------------------------------------------------------
+
+const UNRECONCILED_QUEUE_HARD_CAP = 500;
+
+export async function getUnreconciled(
+  bankAccountId: string,
+): Promise<ValidationResult<PaymentWithLinesAndComputed[]>> {
+  await requireAdmin();
+
+  if (!bankAccountId) {
+    return failure("VALIDATION_ERROR", "bank_account_id is required", {
+      bank_account_id: "Required",
+    });
+  }
+
+  const supabase = await createServerClient();
+
+  const { data, error } = await supabase
+    .from("payments")
+    .select("*")
+    .eq("bank_account_id", bankAccountId)
+    .eq("reconciled", false)
+    .is("deleted_at", null)
+    .order("payment_date", { ascending: true })
+    .order("created_at", { ascending: true })
+    .limit(UNRECONCILED_QUEUE_HARD_CAP);
+
+  if (error) {
+    return failure("NOT_FOUND", "Failed to fetch unreconciled payments");
+  }
+
+  const payments = (data ?? []) as PaymentRow[];
+
+  const linesByPayment = new Map<string, PaymentLineRow[]>();
+  if (payments.length > 0) {
+    const paymentIds = payments.map((p) => p.id);
+    const { data: lineRows, error: lineError } = await supabase
+      .from("payment_lines")
+      .select("*")
+      .in("payment_id", paymentIds)
+      .order("sort_order", { ascending: true });
+
+    if (lineError) {
+      return failure("NOT_FOUND", "Failed to fetch payment lines");
+    }
+
+    for (const line of (lineRows ?? []) as PaymentLineRow[]) {
+      const bucket = linesByPayment.get(line.payment_id);
+      if (bucket) bucket.push(line);
+      else linesByPayment.set(line.payment_id, [line]);
+    }
+  }
+
+  const withComputed: PaymentWithLinesAndComputed[] = payments.map((p) => {
+    const lines = linesByPayment.get(p.id) ?? [];
+    return {
+      ...p,
+      lines,
+      _computed: buildPaymentComputed(lines),
+    };
+  });
+
+  return success(withComputed);
+}
+
+export async function reconcilePayment(
+  id: string,
+  bankReference: string,
+): Promise<ValidationResult<PaymentWithLinesAndComputed>> {
+  const user = await requireAdmin();
+  const supabase = await createServerClient();
+
+  const existing = await fetchActiveById<PaymentRow>(supabase, "payments", id);
+  if (!existing) return failure("NOT_FOUND", "Payment not found");
+
+  const check = validateReconcilePayment(bankReference, existing);
+  if (!check.success) {
+    return check as ValidationResult<PaymentWithLinesAndComputed>;
+  }
+
+  const timestamp = nowISO();
+  const { error: updateError } = await supabase
+    .from("payments")
+    .update({
+      reconciled: true,
+      bank_reference: check.data.bankReference,
+      reconciled_at: timestamp,
+      reconciled_by: user.id,
+      updated_at: timestamp,
+    })
+    .eq("id", id);
+
+  if (updateError) {
+    return failure("VALIDATION_ERROR", updateError.message);
+  }
+
+  return fetchPaymentWithLinesAndComputed(supabase, id);
+}
+
+export async function unreconcilePayment(
+  id: string,
+): Promise<ValidationResult<PaymentWithLinesAndComputed>> {
+  await requireAdmin();
+  const supabase = await createServerClient();
+
+  const existing = await fetchActiveById<PaymentRow>(supabase, "payments", id);
+  if (!existing) return failure("NOT_FOUND", "Payment not found");
+
+  const check = validateUnreconcilePayment(existing);
+  if (!check.success) {
+    return check as ValidationResult<PaymentWithLinesAndComputed>;
+  }
+
+  const timestamp = nowISO();
+  const { error: updateError } = await supabase
+    .from("payments")
+    .update({
+      reconciled: false,
+      reconciled_at: null,
+      reconciled_by: null,
+      updated_at: timestamp,
+    })
+    .eq("id", id);
+
+  if (updateError) {
+    return failure("VALIDATION_ERROR", updateError.message);
+  }
+
+  return fetchPaymentWithLinesAndComputed(supabase, id);
 }
