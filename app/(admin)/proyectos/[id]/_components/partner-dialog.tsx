@@ -16,8 +16,29 @@ import {
   upsertProjectPartner,
   removeProjectPartner,
 } from "@/app/actions/project-partners";
+import { getContact } from "@/app/actions/contacts";
 import type { ProjectPartnerRow } from "@/lib/types";
 import { toast } from "sonner";
+
+// Derive a short label from the full razón social.
+// "CONSTRUCTORA KORAKUEN E.I.R.L." → "CK"
+// "MATERIALES EL BOSQUE S.A."       → "MEB"
+// Falls back to first 3 chars if only one word.
+function deriveShortLabel(razonSocial: string): string {
+  // Strip common legal suffixes
+  const cleaned = razonSocial
+    .replace(/\b(S\.?A\.?C?\.?|E\.?I\.?R\.?L\.?|S\.?R\.?L\.?)\b/gi, "")
+    .trim();
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    return words
+      .slice(0, 4)
+      .map((w) => w[0])
+      .join("")
+      .toUpperCase();
+  }
+  return (words[0] ?? razonSocial).slice(0, 3).toUpperCase();
+}
 
 type Props = {
   children: ReactNode;
@@ -35,24 +56,18 @@ export function PartnerDialog({ children, projectId, partner }: Props) {
   const [contactId, setContactId] = useState<string | null>(
     partner?.contact_id ?? null,
   );
-  const [companyLabel, setCompanyLabel] = useState(partner?.company_label ?? "");
   const [profitPct, setProfitPct] = useState(
     partner ? String(partner.profit_split_pct) : "",
   );
 
   function reset() {
     setContactId(partner?.contact_id ?? null);
-    setCompanyLabel(partner?.company_label ?? "");
     setProfitPct(partner ? String(partner.profit_split_pct) : "");
   }
 
   async function handleSave() {
     if (!contactId) {
       toast.error("Selecciona un socio");
-      return;
-    }
-    if (!companyLabel.trim()) {
-      toast.error("Etiqueta requerida");
       return;
     }
     const pct = parseFloat(profitPct);
@@ -62,9 +77,23 @@ export function PartnerDialog({ children, projectId, partner }: Props) {
     }
 
     setSaving(true);
+
+    // Derive company_label from the contact's razon_social. For edits,
+    // preserve the existing label unless the contact changed.
+    let companyLabel = partner?.company_label ?? "";
+    if (!partner || partner.contact_id !== contactId) {
+      const contactResult = await getContact(contactId);
+      if (!contactResult.success) {
+        setSaving(false);
+        toast.error(contactResult.error.message);
+        return;
+      }
+      companyLabel = deriveShortLabel(contactResult.data.razon_social);
+    }
+
     const result = await upsertProjectPartner(projectId, {
       contact_id: contactId,
-      company_label: companyLabel.trim(),
+      company_label: companyLabel,
       profit_split_pct: pct,
     });
     setSaving(false);
@@ -121,20 +150,6 @@ export function PartnerDialog({ children, projectId, partner }: Props) {
             />
             <p className="mt-1 text-[11px] text-muted-foreground/60">
               Solo contactos marcados como Socio
-            </p>
-          </div>
-          <div>
-            <label className="text-[11px] text-muted-foreground">
-              Etiqueta corta
-            </label>
-            <Input
-              value={companyLabel}
-              onChange={(e) => setCompanyLabel(e.target.value)}
-              placeholder="Korakuen, Andina…"
-              className="mt-0.5"
-            />
-            <p className="mt-1 text-[11px] text-muted-foreground/60">
-              Nombre corto para mostrar en las tarjetas
             </p>
           </div>
           <div>
