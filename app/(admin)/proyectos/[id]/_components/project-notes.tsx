@@ -29,7 +29,7 @@ export function ProjectNotes({ projectId, initialNotes }: Props) {
   }
 
   return (
-    <div>
+    <div className="flex flex-col h-full">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-xs font-medium text-muted-foreground">Notas</h3>
         {!editing ? (
@@ -67,24 +67,23 @@ export function ProjectNotes({ projectId, initialNotes }: Props) {
         )}
       </div>
       <div
-        className="rounded-lg bg-card p-4"
+        className="flex-1 rounded-lg bg-card p-4 flex flex-col min-h-0"
         style={{ border: "1px solid var(--border)" }}
       >
         {editing ? (
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            rows={6}
             placeholder="Notas internas sobre el proyecto…"
-            className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm leading-relaxed text-foreground placeholder-muted-foreground focus:border-primary/50 focus:outline-none"
+            className="flex-1 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm leading-relaxed text-foreground placeholder-muted-foreground focus:border-primary/50 focus:outline-none"
             autoFocus
           />
         ) : notes ? (
-          <div className="text-sm leading-relaxed text-foreground/80 whitespace-pre-wrap">
+          <div className="flex-1 text-sm leading-relaxed text-foreground/80 whitespace-pre-wrap overflow-auto">
             {notes}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground/40">
+          <p className="flex-1 text-sm text-muted-foreground/40">
             Sin notas. Haz clic en Editar para agregar.
           </p>
         )}

@@ -109,14 +109,14 @@ export function PresupuestoTable({
   }
 
   return (
-    <div>
+    <div className="flex flex-col h-full">
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-xs font-medium text-muted-foreground">
           Presupuesto por partida
         </h3>
       </div>
       <div
-        className="rounded-lg bg-card overflow-hidden"
+        className="flex-1 rounded-lg bg-card overflow-hidden"
         style={{ border: "1px solid var(--border)" }}
       >
         {rows.length === 0 ? (

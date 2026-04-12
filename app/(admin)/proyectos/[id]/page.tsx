@@ -171,7 +171,7 @@ export default async function ProjectDetailPage({ params }: Props) {
         </div>
 
         {/* Presupuesto + Notas side by side */}
-        <div className="mt-8 grid grid-cols-2 gap-6 items-start">
+        <div className="mt-8 grid grid-cols-2 gap-6 items-stretch">
           <PresupuestoTable
             projectId={project.id}
             budgets={budgets}
