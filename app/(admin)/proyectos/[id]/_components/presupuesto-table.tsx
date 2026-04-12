@@ -32,7 +32,12 @@ export function PresupuestoTable({
   projectStatus,
 }: Props) {
   const router = useRouter();
-  const editable = projectStatus === PROJECT_STATUS.prospect;
+  // Budgets are editable for prospect AND active projects. They are forecasts,
+  // not ledger data, so changing them doesn't corrupt any financial history.
+  // Backend validator (loadProjectForMutation) only blocks archived/completed/rejected.
+  const editable =
+    projectStatus === PROJECT_STATUS.prospect ||
+    projectStatus === PROJECT_STATUS.active;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
