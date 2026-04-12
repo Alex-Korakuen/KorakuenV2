@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
-import { getContacts, getContactHistorial } from "@/app/actions/contacts";
+import { getContact, getContactHistorial } from "@/app/actions/contacts";
 import { TopBar } from "@/components/app-shell/top-bar";
 import { ExchangeRateChip } from "@/components/app-shell/exchange-rate-chip";
 import { MetadataCard } from "./_components/metadata-card";
@@ -15,13 +15,9 @@ type Props = {
 export default async function ContactDetailPage({ params }: Props) {
   const { id } = await params;
 
-  // Fetch contact by filtering getContacts (no separate getContact action)
-  const contactResult = await getContacts({ search: id, include_deleted: false });
-  const contact = contactResult.success
-    ? contactResult.data.data.find((c) => c.id === id)
-    : undefined;
-
-  if (!contact) notFound();
+  const contactResult = await getContact(id);
+  if (!contactResult.success) notFound();
+  const contact = contactResult.data;
 
   const historialResult = await getContactHistorial(id);
   const historial = historialResult.success

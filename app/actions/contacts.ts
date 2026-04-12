@@ -95,6 +95,25 @@ export async function getContacts(
 }
 
 // ---------------------------------------------------------------------------
+// getContact (single by ID)
+// ---------------------------------------------------------------------------
+
+export async function getContact(
+  id: string,
+): Promise<ValidationResult<ContactRow>> {
+  await requireUser();
+
+  const supabase = await createServerClient();
+  const contact = await fetchActiveById<ContactRow>(supabase, "contacts", id);
+
+  if (!contact) {
+    return failure("NOT_FOUND", "Contacto no encontrado");
+  }
+
+  return success(contact);
+}
+
+// ---------------------------------------------------------------------------
 // lookupContact
 // ---------------------------------------------------------------------------
 
