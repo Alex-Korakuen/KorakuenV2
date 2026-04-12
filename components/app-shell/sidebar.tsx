@@ -48,14 +48,14 @@ function NavGroupBlock({
             className={cn(
               "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
               active
-                ? "bg-amber-100/80 font-semibold text-amber-900"
-                : "text-stone-600 hover:bg-stone-100/80",
+                ? "bg-primary/10 font-semibold text-accent-foreground"
+                : "text-muted-foreground hover:bg-primary/[0.06]",
             )}
           >
             <Icon
               className={cn(
                 "h-[18px] w-[18px] shrink-0",
-                active ? "text-amber-700" : "text-stone-400",
+                active ? "text-primary" : "text-muted-foreground/60",
               )}
             />
             {item.label}
@@ -72,9 +72,9 @@ export function Sidebar({ variant, user }: Props) {
   const initials = getInitials(user.displayName, user.email);
 
   return (
-    <aside className="hidden w-60 shrink-0 flex-col border-r border-stone-100 bg-stone-50/50 md:flex">
+    <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-card md:flex">
       <div className="flex h-14 items-center px-5">
-        <span className="text-base font-bold tracking-tight text-stone-800">
+        <span className="text-base font-bold tracking-tight text-foreground/80">
           Korakuen
         </span>
       </div>
@@ -82,9 +82,7 @@ export function Sidebar({ variant, user }: Props) {
       <nav className="flex-1 overflow-y-auto px-3 py-2">
         {groups.map((group, idx) => (
           <div key={idx}>
-            {idx > 0 && (
-              <div className="my-3 border-t border-stone-200/60" />
-            )}
+            {idx > 0 && <div className="my-3 border-t border-border/60" />}
             <NavGroupBlock group={group} pathname={pathname} />
           </div>
         ))}

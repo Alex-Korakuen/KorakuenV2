@@ -41,18 +41,18 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-stone-50 px-4">
+    <main className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <h1 className="text-xl font-bold tracking-tight text-stone-900">
+          <h1 className="text-xl font-bold tracking-tight text-foreground">
             Korakuen
           </h1>
-          <p className="mt-1 text-sm text-stone-400">Sistema de gestión</p>
+          <p className="mt-1 text-sm text-muted-foreground">Sistema de gestión</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="email" className="text-sm text-stone-500">
+            <Label htmlFor="email" className="text-sm text-muted-foreground">
               Correo electrónico
             </Label>
             <Input
@@ -68,7 +68,7 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="password" className="text-sm text-stone-500">
+            <Label htmlFor="password" className="text-sm text-muted-foreground">
               Contraseña
             </Label>
             <Input

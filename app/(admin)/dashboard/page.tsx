@@ -13,6 +13,7 @@ import { requireAdmin } from "@/lib/auth";
 import { getFinancialPosition } from "@/app/actions/reports";
 import { getBankAccounts } from "@/app/actions/bank-accounts";
 import { formatMoney, formatPEN } from "@/lib/format";
+import { TopBar } from "@/components/app-shell/top-bar";
 import { ACCOUNT_TYPE } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -47,11 +48,13 @@ export default async function AdminDashboard() {
 
   return (
     <div>
+      <TopBar variant="admin" />
+      <div className="max-w-4xl px-8 py-8">
       <div className="mb-8">
-        <h2 className="text-xl font-semibold text-stone-900">
+        <h2 className="text-xl font-semibold text-foreground">
           Bienvenido, {firstName}
         </h2>
-        <p className="mt-1 text-sm text-stone-400">
+        <p className="mt-1 text-sm text-muted-foreground">
           Posición financiera de Constructora Korakuen E.I.R.L.
         </p>
       </div>
@@ -63,7 +66,7 @@ export default async function AdminDashboard() {
           value={formatPEN(cashTotalPen)}
           detail={`${activeAccountCount} ${activeAccountCount === 1 ? "cuenta activa" : "cuentas activas"}`}
           icon={<Wallet className="h-5 w-5" />}
-          iconColor="text-stone-400"
+          iconColor="text-muted-foreground"
         />
         <KpiCard
           label="Cuentas por cobrar"
@@ -84,19 +87,19 @@ export default async function AdminDashboard() {
           value={formatPEN(igvNet)}
           detail={`Débito ${formatPEN(igvOutput)} · Crédito ${formatPEN(igvInput)}`}
           icon={<Receipt className="h-5 w-5" />}
-          iconColor="text-stone-400"
+          iconColor="text-muted-foreground"
         />
       </div>
 
       {/* Caja por cuenta */}
       <div className="mt-10">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-medium text-stone-500">
+          <h3 className="text-sm font-medium text-muted-foreground">
             Caja por cuenta
           </h3>
           <Link
             href="/configuracion/bancos"
-            className="inline-flex items-center gap-0.5 text-xs text-stone-400 hover:text-stone-600"
+            className="inline-flex items-center gap-0.5 text-xs text-muted-foreground hover:text-muted-foreground"
           >
             Gestionar
             <ChevronRight className="h-3.5 w-3.5" />
@@ -104,11 +107,11 @@ export default async function AdminDashboard() {
         </div>
 
         {accounts.length === 0 ? (
-          <p className="py-8 text-center text-sm text-stone-400">
+          <p className="py-8 text-center text-sm text-muted-foreground">
             Aún no hay cuentas bancarias.{" "}
             <Link
               href="/configuracion/bancos"
-              className="text-stone-600 underline underline-offset-2 hover:text-stone-800"
+              className="text-muted-foreground underline underline-offset-2 hover:text-stone-800"
             >
               Crear la primera
             </Link>
@@ -122,25 +125,25 @@ export default async function AdminDashboard() {
               return (
                 <div
                   key={account.id}
-                  className="flex items-center justify-between border-b border-stone-100 py-3.5"
+                  className="flex items-center justify-between border-b border-border/60 py-3.5"
                 >
                   <div className="flex items-center gap-3">
                     <Landmark
                       className={cn(
                         "h-[18px] w-[18px] shrink-0",
-                        isBN ? "text-amber-500" : "text-stone-300",
+                        isBN ? "text-amber-500" : "text-border",
                       )}
                     />
                     <div>
                       <div className="flex items-center gap-2">
-                        <p className="text-sm text-stone-900">{account.name}</p>
+                        <p className="text-sm text-foreground">{account.name}</p>
                         {isBN && (
                           <span className="text-[11px] text-amber-600">
                             detracciones
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-stone-400">
+                      <p className="text-xs text-muted-foreground">
                         {[account.bank_name, account.account_number, account.currency]
                           .filter(Boolean)
                           .join(" · ")}
@@ -148,14 +151,14 @@ export default async function AdminDashboard() {
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-medium tabular-nums text-stone-900">
+                    <p className="text-sm font-medium tabular-nums text-foreground">
                       {formatMoney(
                         account._computed.balance_native,
                         account.currency,
                       )}
                     </p>
                     {isUSD && (
-                      <p className="text-xs text-stone-400">
+                      <p className="text-xs text-muted-foreground">
                         ≈ {formatPEN(account._computed.balance_pen)}
                       </p>
                     )}
@@ -169,40 +172,41 @@ export default async function AdminDashboard() {
 
       {/* Quick actions */}
       <div className="mt-10">
-        <h3 className="mb-3 text-sm font-medium text-stone-500">
+        <h3 className="mb-3 text-sm font-medium text-muted-foreground">
           Acciones rápidas
         </h3>
         <div className="grid gap-3 sm:grid-cols-2">
           <Link
             href="/contactos"
-            className="group flex items-center gap-3 rounded-lg border border-stone-200 p-4 transition-colors hover:border-stone-300 hover:bg-stone-50/50"
+            className="group flex items-center gap-3 rounded-lg border border-border p-4 transition-colors hover:border-primary/30 hover:bg-accent"
           >
-            <UserPlus className="h-5 w-5 shrink-0 text-stone-400 group-hover:text-stone-600" />
+            <UserPlus className="h-5 w-5 shrink-0 text-muted-foreground group-hover:text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-stone-900">
+              <p className="text-sm font-medium text-foreground">
                 Nuevo contacto
               </p>
-              <p className="text-xs text-stone-400">
+              <p className="text-xs text-muted-foreground">
                 Buscar por RUC o DNI en SUNAT
               </p>
             </div>
           </Link>
           <Link
             href="/proyectos/nuevo"
-            className="group flex items-center gap-3 rounded-lg border border-stone-200 p-4 transition-colors hover:border-stone-300 hover:bg-stone-50/50"
+            className="group flex items-center gap-3 rounded-lg border border-border p-4 transition-colors hover:border-primary/30 hover:bg-accent"
           >
-            <FolderPlus className="h-5 w-5 shrink-0 text-stone-400 group-hover:text-stone-600" />
+            <FolderPlus className="h-5 w-5 shrink-0 text-muted-foreground group-hover:text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-stone-900">
+              <p className="text-sm font-medium text-foreground">
                 Nuevo proyecto
               </p>
-              <p className="text-xs text-stone-400">
+              <p className="text-xs text-muted-foreground">
                 Registrar una obra y configurar socios
               </p>
             </div>
           </Link>
         </div>
       </div>
+    </div>
     </div>
   );
 }
@@ -221,15 +225,15 @@ function KpiCard({
   iconColor: string;
 }) {
   return (
-    <div className="rounded-lg border border-stone-200 p-4">
+    <div className="rounded-lg border border-border p-4">
       <div className="flex items-start justify-between">
-        <p className="text-xs text-stone-400">{label}</p>
+        <p className="text-xs text-muted-foreground">{label}</p>
         <span className={iconColor}>{icon}</span>
       </div>
-      <p className="mt-2 text-xl font-semibold tabular-nums text-stone-900">
+      <p className="mt-2 text-xl font-semibold tabular-nums text-foreground">
         {value}
       </p>
-      <p className="mt-1 text-xs text-stone-400">{detail}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
     </div>
   );
 }

@@ -400,3 +400,242 @@ export async function deleteContact(
 
   return success({ id, deleted_at: deletedAt });
 }
+
+// ---------------------------------------------------------------------------
+// getContactHistorial
+// ---------------------------------------------------------------------------
+
+export type ContactHistorialItem = {
+  type: "emitida" | "recibida" | "pago_in" | "pago_out";
+  id: string;
+  date: string;
+  description: string;
+  detail: string | null;
+  amount_pen: number;
+  status_label: string;
+};
+
+export type ContactHistorial = {
+  por_cobrar: {
+    facturado_pen: number;
+    cobrado_pen: number;
+    pendiente_pen: number;
+  } | null;
+  por_pagar: {
+    facturado_pen: number;
+    pagado_pen: number;
+    pendiente_pen: number;
+  } | null;
+  items: ContactHistorialItem[];
+};
+
+export async function getContactHistorial(
+  contactId: string,
+): Promise<ValidationResult<ContactHistorial>> {
+  await requireUser();
+
+  const supabase = await createServerClient();
+
+  // Fetch contact to know roles
+  const contact = await fetchActiveById<ContactRow>(
+    supabase,
+    "contacts",
+    contactId,
+  );
+  if (!contact) {
+    return failure("NOT_FOUND", "Contacto no encontrado");
+  }
+
+  const items: ContactHistorialItem[] = [];
+  let porCobrar: ContactHistorial["por_cobrar"] = null;
+  let porPagar: ContactHistorial["por_pagar"] = null;
+
+  // --- Por cobrar (contact is client) ---
+  if (contact.is_client) {
+    // Find projects where this contact is the client
+    const { data: projects } = await supabase
+      .from("projects")
+      .select("id, name")
+      .eq("client_id", contactId)
+      .is("deleted_at", null);
+
+    const projectIds = (projects ?? []).map((p) => p.id);
+    const projectNames = new Map(
+      (projects ?? []).map((p) => [p.id, p.name]),
+    );
+
+    if (projectIds.length > 0) {
+      const { data: invoices } = await supabase
+        .from("outgoing_invoices")
+        .select("id, project_id, serie_numero, period_start, total_pen, status")
+        .in("project_id", projectIds)
+        .is("deleted_at", null)
+        .order("period_start", { ascending: false });
+
+      // Get payment progress for outgoing invoices
+      const { data: paymentLines } = await supabase
+        .from("payment_lines")
+        .select("outgoing_invoice_id, amount_pen")
+        .in(
+          "outgoing_invoice_id",
+          (invoices ?? []).map((i) => i.id),
+        );
+
+      const paidMap: Record<string, number> = {};
+      for (const pl of paymentLines ?? []) {
+        if (pl.outgoing_invoice_id) {
+          paidMap[pl.outgoing_invoice_id] =
+            (paidMap[pl.outgoing_invoice_id] ?? 0) +
+            Math.abs(Number(pl.amount_pen));
+        }
+      }
+
+      let facturado = 0;
+      let cobrado = 0;
+
+      for (const inv of invoices ?? []) {
+        const totalPen = Number(inv.total_pen);
+        const paid = paidMap[inv.id] ?? 0;
+        facturado += totalPen;
+        cobrado += paid;
+
+        const statusLabel =
+          paid >= totalPen - 0.01
+            ? "Cobrado"
+            : paid > 0
+              ? "Parcial"
+              : inv.status === 1
+                ? "Borrador"
+                : "Pendiente";
+
+        items.push({
+          type: "emitida",
+          id: inv.id,
+          date: inv.period_start,
+          description: inv.serie_numero ?? "Sin número",
+          detail: projectNames.get(inv.project_id) ?? null,
+          amount_pen: totalPen,
+          status_label: statusLabel,
+        });
+      }
+
+      porCobrar = {
+        facturado_pen: Math.round(facturado * 100) / 100,
+        cobrado_pen: Math.round(cobrado * 100) / 100,
+        pendiente_pen: Math.round((facturado - cobrado) * 100) / 100,
+      };
+    } else {
+      porCobrar = { facturado_pen: 0, cobrado_pen: 0, pendiente_pen: 0 };
+    }
+  }
+
+  // --- Por pagar (contact is vendor) ---
+  if (contact.is_vendor) {
+    const { data: invoices } = await supabase
+      .from("incoming_invoices")
+      .select(
+        "id, project_id, serie_numero, factura_status, total_pen, created_at",
+      )
+      .eq("contact_id", contactId)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false });
+
+    // Get project names for these invoices
+    const inProjectIds = [
+      ...new Set(
+        (invoices ?? []).map((i) => i.project_id).filter(Boolean) as string[],
+      ),
+    ];
+    let inProjectNames = new Map<string, string>();
+    if (inProjectIds.length > 0) {
+      const { data: projs } = await supabase
+        .from("projects")
+        .select("id, name")
+        .in("id", inProjectIds);
+      inProjectNames = new Map((projs ?? []).map((p) => [p.id, p.name]));
+    }
+
+    // Get payment progress for incoming invoices
+    const { data: paymentLines } = await supabase
+      .from("payment_lines")
+      .select("incoming_invoice_id, amount_pen")
+      .in(
+        "incoming_invoice_id",
+        (invoices ?? []).map((i) => i.id),
+      );
+
+    const paidMap: Record<string, number> = {};
+    for (const pl of paymentLines ?? []) {
+      if (pl.incoming_invoice_id) {
+        paidMap[pl.incoming_invoice_id] =
+          (paidMap[pl.incoming_invoice_id] ?? 0) +
+          Math.abs(Number(pl.amount_pen));
+      }
+    }
+
+    let facturado = 0;
+    let pagado = 0;
+
+    for (const inv of invoices ?? []) {
+      const totalPen = Number(inv.total_pen);
+      const paid = paidMap[inv.id] ?? 0;
+      facturado += totalPen;
+      pagado += paid;
+
+      const statusLabel =
+        paid >= totalPen - 0.01
+          ? "Pagado"
+          : paid > 0
+            ? "Parcial"
+            : inv.factura_status === 1
+              ? "Esperada"
+              : "Pendiente";
+
+      items.push({
+        type: "recibida",
+        id: inv.id,
+        date: inv.created_at.split("T")[0],
+        description: inv.serie_numero ?? "Sin número",
+        detail: inv.project_id
+          ? inProjectNames.get(inv.project_id) ?? null
+          : null,
+        amount_pen: totalPen,
+        status_label: statusLabel,
+      });
+    }
+
+    porPagar = {
+      facturado_pen: Math.round(facturado * 100) / 100,
+      pagado_pen: Math.round(pagado * 100) / 100,
+      pendiente_pen: Math.round((facturado - pagado) * 100) / 100,
+    };
+  }
+
+  // --- Payments involving this contact ---
+  const { data: payments } = await supabase
+    .from("payments")
+    .select(
+      "id, direction, total_amount_pen, payment_date, bank_reference, reconciled",
+    )
+    .eq("contact_id", contactId)
+    .is("deleted_at", null)
+    .order("payment_date", { ascending: false });
+
+  for (const p of payments ?? []) {
+    const isInbound = p.direction === 1;
+    items.push({
+      type: isInbound ? "pago_in" : "pago_out",
+      id: p.id,
+      date: p.payment_date,
+      description: p.bank_reference ?? (isInbound ? "Pago recibido" : "Pago realizado"),
+      detail: null,
+      amount_pen: Number(p.total_amount_pen),
+      status_label: p.reconciled ? "Conciliado" : "Sin conciliar",
+    });
+  }
+
+  // Sort all items by date descending
+  items.sort((a, b) => b.date.localeCompare(a.date));
+
+  return success({ por_cobrar: porCobrar, por_pagar: porPagar, items });
+}
