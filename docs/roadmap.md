@@ -852,19 +852,75 @@ Financiera" page.
 
 ### Step 13 — Dashboard UI and Partner Views
 
-Priority order:
+Ships incrementally as sub-steps — each one its own Vercel deploy.
+Design language: warm, minimalist, Todoist-inspired with terracotta
+accent (`#C4785C`). Design spec lives in the approved HTML mockups at
+`~/korakuen-mockups/v3-*.html` and the memory file
+`project_step13_design_language.md`.
 
-1. Auth flow and role-based layout
-2. Projects list with status indicators and financial summary
-3. Project detail — contract, invoice list, payment list, settlement
-4. New outgoing invoice form (with line items)
-5. New payment form (with payment lines and invoice matching)
-6. Bank reconciliation queue UI
-7. Reports: cash position, IGV, outstanding receivables
-8. Partner view — restricted to assigned projects, their costs, their profit share
-9. Exchange rate alert banner (from health endpoint)
+**Deployed at:** `https://korakuenv2.vercel.app`
 
-**Commit:** `feat: dashboard UI — admin and partner views`
+**Phase 1 — Foundation** ✅
+Install shadcn/ui primitives, create app shell (sidebar, top-bar),
+lib helpers (format, labels, form, search-params). Warm theme tokens
+in `globals.css` (later updated to terracotta in Sub-step 2).
+Commit: `chore(ui): install shadcn primitives, app shell, and formatting helpers`
+
+**Sub-step 1 — Auth polish + admin home** ✅
+Branded login page. Admin home renders 4 KPI cards from
+`getFinancialPosition` (caja total, por cobrar, por pagar, IGV neto),
+a "Caja por cuenta" section listing bank accounts with computed
+balances, and 2 quick-action cards. `getBankAccounts` extended with
+`balance_native` for native-currency display on USD accounts.
+Commit: `feat(ui): branded login and admin home with KPIs + caja por cuenta`
+
+**Sub-step 2 — Contactos full CRUD** ✅
+Terracotta palette update. `/contactos` list with search + role
+filters. `ContactLookupDialog` for SUNAT/RENIEC creation. Contact
+detail at `/contactos/[id]` with metadata card (inline-editable
+email/phone/address), notes section (view/edit toggle, markdown),
+and historial section with split "Por cobrar / Por pagar" summary
+and chronological timeline. New server actions: `getContact(id)`,
+`getContactHistorial(id)` (joins projects → outgoing invoices,
+incoming invoices, and payments).
+Commits:
+- `refactor(ui): warm Todoist-inspired design language`
+- `feat(ui): contactos CRUD + terracotta design update`
+- `fix: contact detail 404 — add getContact(id) action`
+
+**Sub-step 3 — Bancos in dashboard** ✅
+Bank account management merged into the dashboard's "Caja por cuenta"
+section instead of a dedicated `/configuracion/bancos` page.
+`+ Nueva cuenta` button opens `BankAccountDialog`. Each account row
+reveals a pencil icon on hover to edit. For security, only the last
+4 digits of `account_number` are stored and displayed as `···· XXXX`
+— validator enforces `/^\d{4}$/` on the field. Currency and account
+type become immutable in edit mode.
+Commit: `feat(ui): bancos merged into dashboard — inline CRUD + 4-digit mask`
+
+---
+
+**Remaining sub-steps** (not yet started):
+
+- **Sub-step 4** — Proyectos list + new project form
+- **Sub-step 5** — Project detail with partners, budgets, lifecycle
+- **Sub-step 6** — Facturas emitidas CRUD (list + form + line items)
+- **Sub-step 7** — Facturas recibidas CRUD (expected → received flow)
+- **Sub-step 8** — Pagos with line editor, linking, split, expected-invoice creation
+- **Sub-step 9** — Conciliación bancaria queue
+- **Sub-step 10** — Reportes (posición financiera, proyecto, liquidación)
+- **Sub-step 11** — Vista socio (read-only, partner-scoped report actions)
+
+Key interaction conventions (locked in during Sub-step 2):
+- **Dialog** for simple creation (3–5 fields) — Nuevo contacto, Nueva cuenta
+- **Full page** for complex forms — invoices, payments, projects
+- **Inline editing** for quick field toggles — contact fields, role checkboxes
+- **Click row → detail page** for lists; no inline row editing
+- **Back link in top bar** on detail pages (`← Contactos`)
+- **Destructive actions** get an `AlertDialog` confirm; saves don't
+- **Historial pattern** — split por cobrar/pagar summary + chronological
+  timeline with type pills (Emitida/Recibida/Pago). Reused for vendor
+  and partner detail pages later.
 
 ---
 
