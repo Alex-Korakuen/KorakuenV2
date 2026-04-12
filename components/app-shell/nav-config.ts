@@ -6,7 +6,6 @@ import {
   FileUp,
   FolderKanban,
   Home,
-  Landmark,
   Settings,
   Users,
   Wallet,
@@ -28,7 +27,6 @@ export const ADMIN_NAV: NavGroup[] = [
     items: [
       { href: "/dashboard", label: "Inicio", icon: Home },
       { href: "/contactos", label: "Contactos", icon: Users },
-      { href: "/bancos", label: "Bancos", icon: Landmark },
       { href: "/proyectos", label: "Proyectos", icon: FolderKanban },
     ],
   },
@@ -47,8 +45,11 @@ export const ADMIN_NAV: NavGroup[] = [
   },
   {
     heading: "Análisis",
+    items: [{ href: "/reportes", label: "Reportes", icon: BarChart3 }],
+  },
+  {
+    heading: "Sistema",
     items: [
-      { href: "/reportes", label: "Reportes", icon: BarChart3 },
       { href: "/configuracion", label: "Configuración", icon: Settings },
     ],
   },

@@ -19,7 +19,7 @@ import {
 // ---------------------------------------------------------------------------
 
 type BankAccountWithBalance = BankAccountRow & {
-  _computed: { balance_pen: number };
+  _computed: { balance_pen: number; balance_native: number };
 };
 
 type BankAccountListFilters = {
@@ -79,19 +79,44 @@ export async function getBankAccounts(
 
   const rows = (accounts ?? []) as BankAccountRow[];
 
-  // Derive balances via Postgres function — single round trip
-  let balanceMap: Record<string, number> = {};
+  // Derive balances. balance_pen comes from the existing RPC (signed sum
+  // of total_amount_pen). balance_native is the same signed sum on
+  // total_amount, computed inline so we don't need a second migration.
+  const balancePenMap: Record<string, number> = {};
+  const balanceNativeMap: Record<string, number> = {};
 
   if (rows.length > 0) {
     const accountIds = rows.map((a) => a.id);
-    const { data: balances, error: balanceError } = await supabase.rpc(
-      "get_bank_account_balances",
-      { account_ids: accountIds },
-    );
+
+    const [{ data: balances, error: balanceError }, { data: payments, error: paymentsError }] =
+      await Promise.all([
+        supabase.rpc("get_bank_account_balances", { account_ids: accountIds }),
+        supabase
+          .from("payments")
+          .select("bank_account_id, direction, total_amount")
+          .in("bank_account_id", accountIds)
+          .is("deleted_at", null),
+      ]);
 
     if (!balanceError && balances) {
-      for (const b of balances as { bank_account_id: string; balance_pen: number }[]) {
-        balanceMap[b.bank_account_id] = b.balance_pen;
+      for (const b of balances as {
+        bank_account_id: string;
+        balance_pen: number;
+      }[]) {
+        balancePenMap[b.bank_account_id] = Number(b.balance_pen);
+      }
+    }
+
+    if (!paymentsError && payments) {
+      for (const p of payments as {
+        bank_account_id: string;
+        direction: number;
+        total_amount: number;
+      }[]) {
+        const signed =
+          p.direction === 1 ? Number(p.total_amount) : -Number(p.total_amount);
+        balanceNativeMap[p.bank_account_id] =
+          (balanceNativeMap[p.bank_account_id] ?? 0) + signed;
       }
     }
   }
@@ -99,7 +124,8 @@ export async function getBankAccounts(
   const data: BankAccountWithBalance[] = rows.map((account) => ({
     ...account,
     _computed: {
-      balance_pen: balanceMap[account.id] ?? 0,
+      balance_pen: balancePenMap[account.id] ?? 0,
+      balance_native: balanceNativeMap[account.id] ?? 0,
     },
   }));
 
@@ -132,7 +158,7 @@ export async function createBankAccount(
 
   return success({
     ...(inserted as BankAccountRow),
-    _computed: { balance_pen: 0 },
+    _computed: { balance_pen: 0, balance_native: 0 },
   });
 }
 
