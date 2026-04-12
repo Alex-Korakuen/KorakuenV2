@@ -56,7 +56,8 @@ export function ContactPicker({
         }
       }
     });
-  }, [search, filter, value, selectedLabel]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, filter, value]);
 
   function handleSelect(contact: ContactRow) {
     onChange(contact.id);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
+import { useState, useEffect, useTransition, useMemo } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import {
   Popover,
@@ -27,10 +27,12 @@ type Props = {
   className?: string;
 };
 
+const DEFAULT_STATUSES = [PROJECT_STATUS.prospect, PROJECT_STATUS.active];
+
 export function ProjectPicker({
   value,
   onChange,
-  statuses = [PROJECT_STATUS.prospect, PROJECT_STATUS.active],
+  statuses,
   placeholder = "Buscar proyecto…",
   className,
 }: Props) {
@@ -40,11 +42,18 @@ export function ProjectPicker({
   const [selected, setSelected] = useState<ProjectRow | null>(null);
   const [, startTransition] = useTransition();
 
+  // Stable key for the statuses array so the effect doesn't loop on every render.
+  const statusesKey = useMemo(
+    () => (statuses ?? DEFAULT_STATUSES).join(","),
+    [statuses],
+  );
+
   useEffect(() => {
+    const effectiveStatuses = statuses ?? DEFAULT_STATUSES;
     startTransition(async () => {
       // Fetch each allowed status and merge. getProjects filter.status is a single value.
       const results = await Promise.all(
-        statuses.map((s) =>
+        effectiveStatuses.map((s) =>
           getProjects({ status: s, search: search.trim() || undefined }),
         ),
       );
@@ -60,7 +69,8 @@ export function ProjectPicker({
         if (found) setSelected(found);
       }
     });
-  }, [search, statuses, value, selected]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, statusesKey, value]);
 
   function handleSelect(project: ProjectRow) {
     setSelected(project);
