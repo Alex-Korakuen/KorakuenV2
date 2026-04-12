@@ -108,6 +108,30 @@ export async function getProjectBudgets(
 }
 
 // ---------------------------------------------------------------------------
+// getCostCategories — list all active cost categories
+// ---------------------------------------------------------------------------
+
+export async function getCostCategories(): Promise<
+  ValidationResult<CostCategoryRow[]>
+> {
+  await requireUser();
+
+  const supabase = await createServerClient();
+
+  const { data, error } = await supabase
+    .from("cost_categories")
+    .select("*")
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true });
+
+  if (error) {
+    return failure("NOT_FOUND", "Failed to fetch cost categories");
+  }
+
+  return success((data ?? []) as CostCategoryRow[]);
+}
+
+// ---------------------------------------------------------------------------
 // upsertProjectBudget
 // ---------------------------------------------------------------------------
 

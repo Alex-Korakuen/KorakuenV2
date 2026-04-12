@@ -6,7 +6,10 @@ import {
   getProjectHistorial,
 } from "@/app/actions/projects";
 import { getProjectPartners } from "@/app/actions/project-partners";
-import { getProjectBudgets } from "@/app/actions/project-budgets";
+import {
+  getProjectBudgets,
+  getCostCategories,
+} from "@/app/actions/project-budgets";
 import { getContacts } from "@/app/actions/contacts";
 import { TopBar } from "@/components/app-shell/top-bar";
 import { ExchangeRateChip } from "@/components/app-shell/exchange-rate-chip";
@@ -17,6 +20,7 @@ import { LifecycleAction } from "./_components/lifecycle-action";
 import { SociosChips } from "./_components/socios-chips";
 import { PresupuestoTable } from "./_components/presupuesto-table";
 import { ProjectNotes } from "./_components/project-notes";
+import { MetadataFields } from "./_components/metadata-fields";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -79,28 +83,28 @@ export default async function ProjectDetailPage({ params }: Props) {
   if (!projectResult.success) notFound();
   const project = projectResult.data;
 
-  const [partnersResult, budgetsResult, historialResult, clientResult] =
-    await Promise.all([
-      getProjectPartners(id),
-      getProjectBudgets(id),
-      getProjectHistorial(id),
-      getContacts({ search: project.client_id }),
-    ]);
+  const [
+    partnersResult,
+    budgetsResult,
+    categoriesResult,
+    historialResult,
+    clientResult,
+  ] = await Promise.all([
+    getProjectPartners(id),
+    getProjectBudgets(id),
+    getCostCategories(),
+    getProjectHistorial(id),
+    getContacts({ search: project.client_id }),
+  ]);
 
   const partners = partnersResult.success ? partnersResult.data : [];
   const budgets = budgetsResult.success ? budgetsResult.data : [];
+  const categories = categoriesResult.success ? categoriesResult.data : [];
   const historial = historialResult.success ? historialResult.data : [];
 
   const client = clientResult.success
     ? clientResult.data.data.find((c) => c.id === project.client_id)
     : undefined;
-
-  const periodo =
-    project.start_date && project.expected_end_date
-      ? `${formatDate(project.start_date)} → ${formatDate(project.expected_end_date)}`
-      : project.start_date
-        ? `Desde ${formatDate(project.start_date)}`
-        : "—";
 
   return (
     <div>
@@ -157,31 +161,12 @@ export default async function ProjectDetailPage({ params }: Props) {
             </div>
           </div>
 
-          {/* Inline fields: 3 columns */}
+          {/* Inline editable fields: 3 columns */}
           <div
             className="mt-4 grid grid-cols-3 gap-0"
             style={{ borderTop: "1px solid var(--border)", paddingTop: "12px" }}
           >
-            <div className="px-2.5 py-1.5" style={{ borderRight: "1px solid var(--border)" }}>
-              <span className="text-[11px] text-muted-foreground">Ubicación</span>
-              <p className="text-sm text-foreground">
-                {project.location || (
-                  <span className="text-muted-foreground/40">—</span>
-                )}
-              </p>
-            </div>
-            <div className="px-2.5 py-1.5" style={{ borderRight: "1px solid var(--border)" }}>
-              <span className="text-[11px] text-muted-foreground">Contrato</span>
-              <p className="text-sm font-medium tabular-nums text-foreground">
-                {project.contract_value
-                  ? `${project.contract_currency === "USD" ? "$" : "S/"} ${Number(project.contract_value).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                  : "—"}
-              </p>
-            </div>
-            <div className="px-2.5 py-1.5">
-              <span className="text-[11px] text-muted-foreground">Periodo</span>
-              <p className="text-sm text-foreground">{periodo}</p>
-            </div>
+            <MetadataFields project={project} />
           </div>
         </div>
 
@@ -190,6 +175,7 @@ export default async function ProjectDetailPage({ params }: Props) {
           <PresupuestoTable
             projectId={project.id}
             budgets={budgets}
+            categories={categories}
             projectStatus={project.status}
           />
           <ProjectNotes

@@ -204,9 +204,19 @@ export async function createProject(
     }
   }
 
+  // Auto-set signed_date to today if not provided. The UI doesn't surface
+  // this field (Alex's workflow doesn't care about contract sign date
+  // separately), but the activation validator requires it.
+  const today = new Date().toISOString().split("T")[0];
+  const payload = {
+    ...data,
+    status: PROJECT_STATUS.prospect,
+    signed_date: data.signed_date ?? today,
+  };
+
   const { data: inserted, error } = await supabase
     .from("projects")
-    .insert({ ...data, status: PROJECT_STATUS.prospect })
+    .insert(payload)
     .select()
     .single();
 
@@ -355,6 +365,43 @@ export async function activateProject(
 
   if (error || !updated) {
     return failure("VALIDATION_ERROR", error?.message ?? "Activation failed");
+  }
+
+  return success(updated as ProjectRow);
+}
+
+// ---------------------------------------------------------------------------
+// rejectProject — prospect/active → rejected
+// ---------------------------------------------------------------------------
+
+export async function rejectProject(
+  id: string,
+): Promise<ValidationResult<ProjectRow>> {
+  await requireAdmin();
+
+  const supabase = await createServerClient();
+
+  const project = await fetchActiveById<ProjectRow>(supabase, "projects", id);
+  if (!project) {
+    return failure("NOT_FOUND", "Project not found");
+  }
+
+  const transition = assertTransition(
+    "project",
+    project.status,
+    PROJECT_STATUS.rejected,
+  );
+  if (!transition.success) return transition as ValidationResult<ProjectRow>;
+
+  const { data: updated, error } = await supabase
+    .from("projects")
+    .update({ status: PROJECT_STATUS.rejected, updated_at: nowISO() })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error || !updated) {
+    return failure("VALIDATION_ERROR", error?.message ?? "Rejection failed");
   }
 
   return success(updated as ProjectRow);
