@@ -532,3 +532,152 @@ export async function deleteProject(
 
   return success({ id, deleted_at: deletedAt });
 }
+
+// ---------------------------------------------------------------------------
+// getProjectHistorial — chronological mix of invoices and payments
+// ---------------------------------------------------------------------------
+
+export type ProjectHistorialItem = {
+  type: "emitida" | "recibida" | "pago_in" | "pago_out";
+  id: string;
+  date: string;
+  description: string;
+  detail: string | null;
+  amount_pen: number;
+  status_label: string;
+};
+
+export async function getProjectHistorial(
+  projectId: string,
+): Promise<ValidationResult<ProjectHistorialItem[]>> {
+  await requireUser();
+
+  const supabase = await createServerClient();
+  const items: ProjectHistorialItem[] = [];
+
+  // Outgoing invoices for this project
+  const { data: outgoing } = await supabase
+    .from("outgoing_invoices")
+    .select("id, serie_numero, period_start, total_pen, status")
+    .eq("project_id", projectId)
+    .is("deleted_at", null);
+
+  // Incoming invoices for this project
+  const { data: incoming } = await supabase
+    .from("incoming_invoices")
+    .select(
+      "id, contact_id, serie_numero, factura_status, total_pen, created_at",
+    )
+    .eq("project_id", projectId)
+    .is("deleted_at", null);
+
+  // Vendor names for incoming invoices
+  const vendorIds = [
+    ...new Set((incoming ?? []).map((i) => i.contact_id).filter(Boolean) as string[]),
+  ];
+  let vendorMap = new Map<string, string>();
+  if (vendorIds.length > 0) {
+    const { data } = await supabase
+      .from("contacts")
+      .select("id, razon_social")
+      .in("id", vendorIds);
+    vendorMap = new Map((data ?? []).map((c) => [c.id, c.razon_social]));
+  }
+
+  // Payment progress maps
+  const outgoingIds = (outgoing ?? []).map((i) => i.id);
+  const incomingIds = (incoming ?? []).map((i) => i.id);
+  const allInvoiceIds = [...outgoingIds, ...incomingIds];
+
+  const paidOutMap: Record<string, number> = {};
+  const paidInMap: Record<string, number> = {};
+
+  if (allInvoiceIds.length > 0) {
+    const { data: lines } = await supabase
+      .from("payment_lines")
+      .select("outgoing_invoice_id, incoming_invoice_id, amount_pen")
+      .or(
+        `outgoing_invoice_id.in.(${outgoingIds.length ? outgoingIds.join(",") : "00000000-0000-0000-0000-000000000000"}),incoming_invoice_id.in.(${incomingIds.length ? incomingIds.join(",") : "00000000-0000-0000-0000-000000000000"})`,
+      );
+
+    for (const pl of lines ?? []) {
+      const amt = Math.abs(Number(pl.amount_pen));
+      if (pl.outgoing_invoice_id) {
+        paidOutMap[pl.outgoing_invoice_id] =
+          (paidOutMap[pl.outgoing_invoice_id] ?? 0) + amt;
+      }
+      if (pl.incoming_invoice_id) {
+        paidInMap[pl.incoming_invoice_id] =
+          (paidInMap[pl.incoming_invoice_id] ?? 0) + amt;
+      }
+    }
+  }
+
+  for (const inv of outgoing ?? []) {
+    const total = Number(inv.total_pen);
+    const paid = paidOutMap[inv.id] ?? 0;
+    const statusLabel =
+      paid >= total - 0.01
+        ? "Cobrado"
+        : paid > 0
+          ? "Parcial"
+          : inv.status === 1
+            ? "Borrador"
+            : "Pendiente";
+    items.push({
+      type: "emitida",
+      id: inv.id,
+      date: inv.period_start,
+      description: inv.serie_numero ?? "Sin número",
+      detail: null,
+      amount_pen: total,
+      status_label: statusLabel,
+    });
+  }
+
+  for (const inv of incoming ?? []) {
+    const total = Number(inv.total_pen);
+    const paid = paidInMap[inv.id] ?? 0;
+    const statusLabel =
+      paid >= total - 0.01
+        ? "Pagado"
+        : paid > 0
+          ? "Parcial"
+          : inv.factura_status === 1
+            ? "Esperada"
+            : "Pendiente";
+    items.push({
+      type: "recibida",
+      id: inv.id,
+      date: (inv.created_at as string).split("T")[0],
+      description: inv.serie_numero ?? "Sin número",
+      detail: vendorMap.get(inv.contact_id) ?? null,
+      amount_pen: total,
+      status_label: statusLabel,
+    });
+  }
+
+  // Payments associated with this project
+  const { data: payments } = await supabase
+    .from("payments")
+    .select("id, direction, total_amount_pen, payment_date, bank_reference, reconciled")
+    .eq("project_id", projectId)
+    .is("deleted_at", null);
+
+  for (const p of payments ?? []) {
+    const isInbound = p.direction === 1;
+    items.push({
+      type: isInbound ? "pago_in" : "pago_out",
+      id: p.id,
+      date: p.payment_date,
+      description: p.bank_reference ?? (isInbound ? "Pago recibido" : "Pago realizado"),
+      detail: null,
+      amount_pen: Number(p.total_amount_pen),
+      status_label: p.reconciled ? "Conciliado" : "Sin conciliar",
+    });
+  }
+
+  items.sort((a, b) => b.date.localeCompare(a.date));
+
+  return success(items);
+}
