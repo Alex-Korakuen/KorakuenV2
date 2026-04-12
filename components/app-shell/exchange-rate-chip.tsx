@@ -1,4 +1,3 @@
-import { CircleDot } from "lucide-react";
 import { checkExchangeRateHealth } from "@/lib/exchange-rate";
 import { cn } from "@/lib/utils";
 
@@ -7,30 +6,17 @@ export async function ExchangeRateChip() {
   const ok = health.ok && health.last_rate_promedio !== null;
 
   return (
-    <div
-      className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs",
-        ok
-          ? "border-slate-200 bg-slate-50"
-          : "border-rose-200 bg-rose-50",
-      )}
-      title={
-        ok
-          ? `Tipo de cambio del ${health.last_rate_date}`
-          : "Tipo de cambio no disponible"
-      }
-    >
-      <CircleDot
+    <div className="flex items-center gap-1.5 text-xs text-stone-400">
+      <span
         className={cn(
-          "h-3 w-3",
-          ok ? "text-emerald-500" : "text-rose-500",
+          "h-1.5 w-1.5 rounded-full",
+          ok ? "bg-emerald-400" : "bg-rose-400",
         )}
       />
-      <span className="font-medium text-slate-700">USD/PEN</span>
-      <span className="text-slate-500">
+      <span>
         {ok && health.last_rate_promedio
-          ? `S/ ${health.last_rate_promedio.toFixed(4)}`
-          : "no disponible"}
+          ? `USD/PEN S/ ${health.last_rate_promedio.toFixed(4)}`
+          : "USD/PEN no disponible"}
       </span>
     </div>
   );

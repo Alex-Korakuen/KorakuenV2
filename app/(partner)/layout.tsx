@@ -11,7 +11,7 @@ export default async function PartnerLayout({
   const user = await requirePartner();
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
+    <div className="flex min-h-screen bg-white">
       <Sidebar
         variant="partner"
         user={{
@@ -22,8 +22,8 @@ export default async function PartnerLayout({
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar variant="partner" />
         <ExchangeRateBanner variant="partner" />
-        <main className="flex-1 overflow-y-auto px-6 py-8">
-          <div className="mx-auto max-w-7xl">{children}</div>
+        <main className="flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-4xl px-6 py-8">{children}</div>
         </main>
       </div>
     </div>
