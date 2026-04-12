@@ -2,9 +2,10 @@ import Link from "next/link";
 import {
   ArrowDownCircle,
   ArrowUpCircle,
-  ChevronRight,
   FolderPlus,
   Landmark,
+  Pencil,
+  Plus,
   Receipt,
   UserPlus,
   Wallet,
@@ -16,6 +17,7 @@ import { formatMoney, formatPEN } from "@/lib/format";
 import { TopBar } from "@/components/app-shell/top-bar";
 import { ACCOUNT_TYPE } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { BankAccountDialog } from "./_components/bank-account-dialog";
 
 export default async function AdminDashboard() {
   const user = await requireAdmin();
@@ -97,35 +99,37 @@ export default async function AdminDashboard() {
           <h3 className="text-sm font-medium text-muted-foreground">
             Caja por cuenta
           </h3>
-          <Link
-            href="/configuracion/bancos"
-            className="inline-flex items-center gap-0.5 text-xs text-muted-foreground hover:text-muted-foreground"
-          >
-            Gestionar
-            <ChevronRight className="h-3.5 w-3.5" />
-          </Link>
+          <BankAccountDialog mode="create">
+            <button className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:opacity-80">
+              <Plus className="h-3.5 w-3.5" />
+              Nueva cuenta
+            </button>
+          </BankAccountDialog>
         </div>
 
         {accounts.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">
+          <div className="py-8 text-center text-sm text-muted-foreground">
             Aún no hay cuentas bancarias.{" "}
-            <Link
-              href="/configuracion/bancos"
-              className="text-muted-foreground underline underline-offset-2 hover:text-stone-800"
-            >
-              Crear la primera
-            </Link>
-          </p>
+            <BankAccountDialog mode="create">
+              <button className="text-primary underline underline-offset-2">
+                Crear la primera
+              </button>
+            </BankAccountDialog>
+          </div>
         ) : (
-          <div className="space-y-0">
+          <div className="divide-y divide-border/60">
             {accounts.map((account) => {
               const isBN =
                 account.account_type === ACCOUNT_TYPE.banco_de_la_nacion;
               const isUSD = account.currency === "USD";
+              // Display only the last 4 chars of account_number (masked)
+              const maskedNumber = account.account_number
+                ? `···· ${account.account_number.slice(-4)}`
+                : null;
               return (
                 <div
                   key={account.id}
-                  className="flex items-center justify-between border-b border-border/60 py-3.5"
+                  className="group flex items-center justify-between rounded-lg px-3 py-3.5 transition-colors hover:bg-primary/[0.04]"
                 >
                   <div className="flex items-center gap-3">
                     <Landmark
@@ -136,7 +140,9 @@ export default async function AdminDashboard() {
                     />
                     <div>
                       <div className="flex items-center gap-2">
-                        <p className="text-sm text-foreground">{account.name}</p>
+                        <p className="text-sm text-foreground">
+                          {account.name}
+                        </p>
                         {isBN && (
                           <span className="text-[11px] text-amber-600">
                             detracciones
@@ -144,24 +150,34 @@ export default async function AdminDashboard() {
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        {[account.bank_name, account.account_number, account.currency]
+                        {[account.bank_name, maskedNumber, account.currency]
                           .filter(Boolean)
                           .join(" · ")}
                       </p>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-medium tabular-nums text-foreground">
-                      {formatMoney(
-                        account._computed.balance_native,
-                        account.currency,
-                      )}
-                    </p>
-                    {isUSD && (
-                      <p className="text-xs text-muted-foreground">
-                        ≈ {formatPEN(account._computed.balance_pen)}
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <p className="text-sm font-medium tabular-nums text-foreground">
+                        {formatMoney(
+                          account._computed.balance_native,
+                          account.currency,
+                        )}
                       </p>
-                    )}
+                      {isUSD && (
+                        <p className="text-xs text-muted-foreground">
+                          ≈ {formatPEN(account._computed.balance_pen)}
+                        </p>
+                      )}
+                    </div>
+                    <BankAccountDialog mode="edit" account={account}>
+                      <button
+                        className="inline-flex h-6 w-6 items-center justify-center rounded text-primary opacity-0 transition-opacity hover:bg-primary/10 group-hover:opacity-100"
+                        title="Editar"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    </BankAccountDialog>
                   </div>
                 </div>
               );

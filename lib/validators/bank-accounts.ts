@@ -47,6 +47,15 @@ export function validateCreateBankAccount(
       "Banco de la Nacion accounts must use PEN";
   }
 
+  // Account number: optional, but if provided must be exactly 4 digits
+  // (we only store the last 4 digits for security)
+  if (data.account_number !== undefined && data.account_number !== null) {
+    const trimmed = String(data.account_number).trim();
+    if (trimmed && !/^\d{4}$/.test(trimmed)) {
+      fields.account_number = "Debe ser exactamente 4 dígitos numéricos";
+    }
+  }
+
   if (Object.keys(fields).length > 0) {
     return failure(
       "VALIDATION_ERROR",
@@ -115,6 +124,21 @@ export function validateUpdateBankAccount(
           });
         }
         (updates as Record<string, unknown>)[key] = trimmed;
+      } else if (key === "account_number") {
+        // Account number: optional, but if provided must be exactly 4 digits
+        if (value !== null && value !== undefined) {
+          const trimmed = typeof value === "string" ? value.trim() : "";
+          if (trimmed && !/^\d{4}$/.test(trimmed)) {
+            return failure(
+              "VALIDATION_ERROR",
+              "account_number must be exactly 4 digits",
+              { account_number: "Debe ser exactamente 4 dígitos numéricos" },
+            );
+          }
+          (updates as Record<string, unknown>)[key] = trimmed || null;
+        } else {
+          (updates as Record<string, unknown>)[key] = null;
+        }
       } else {
         (updates as Record<string, unknown>)[key] = value;
       }
