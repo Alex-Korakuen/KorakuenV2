@@ -53,6 +53,7 @@ export const HEADER_FIELD_EDITORS = {
   exchange_rate: { kind: "input", inputType: "number", placeholder: "3.80" },
   bank_reference: { kind: "input", inputType: "text" },
   contact_ruc: { kind: "input", inputType: "text", placeholder: "20XXXXXXXXX" },
+  partner_ruc: { kind: "input", inputType: "text", placeholder: "RUC del partner (opcional)" },
   project_code: { kind: "combobox", source: "projects" },
   notes: { kind: "input", inputType: "text" },
 } as const satisfies Record<string, EditorConfig>;

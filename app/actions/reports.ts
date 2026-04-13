@@ -619,6 +619,11 @@ export async function getFinancialPosition(
   // Formula: docs/api-design-principles.md:266-286
   // Output uses `issue_date`; input uses `fecha_emision` (the SUNAT-facing
   // date, only populated once factura_status=received).
+  //
+  // Scope: Korakuen's own SUNAT return only. Rows with a non-null partner_id
+  // belong to a different consortium member and are excluded — that partner
+  // files its own return. A future "consortium-wide" toggle can drop the
+  // filter when Alex needs the pooled view.
 
   const { data: igvOutRows } = await supabase
     .from("outgoing_invoices")
@@ -627,6 +632,7 @@ export async function getFinancialPosition(
     .in("estado_sunat", ["accepted", "aceptado"])
     .gte("issue_date", period_start)
     .lte("issue_date", period_end)
+    .is("partner_id", null)
     .is("deleted_at", null);
   const igv_output_pen = (igvOutRows ?? []).reduce(
     (acc, r) => acc + Number((r as { igv_amount: number }).igv_amount),
@@ -639,6 +645,7 @@ export async function getFinancialPosition(
     .eq("factura_status", INCOMING_INVOICE_FACTURA_STATUS.received)
     .gte("fecha_emision", period_start)
     .lte("fecha_emision", period_end)
+    .is("partner_id", null)
     .is("deleted_at", null);
   const igv_input_pen = (igvInRows ?? []).reduce(
     (acc, r) => acc + Number((r as { igv_amount: number }).igv_amount),
@@ -740,7 +747,9 @@ export async function getFinancialPosition(
 
   // --- Receivables ----------------------------------------------------------
   // outgoing_invoices has no direct contact_id; clients come via
-  // projects.client_id. Join through the project.
+  // projects.client_id. Join through the project. Scope: Korakuen's own
+  // receivables only (partner_id IS NULL). Partner-owned invoices are
+  // visible in the project view but not counted here.
 
   const { data: outRaw } = await supabase
     .from("outgoing_invoices")
@@ -748,6 +757,7 @@ export async function getFinancialPosition(
       "id, total_pen, estado_sunat, project:projects!outgoing_invoices_project_id_fkey(client_id)",
     )
     .neq("status", OUTGOING_INVOICE_STATUS.void)
+    .is("partner_id", null)
     .is("deleted_at", null);
   const outInvoices = (outRaw ?? []) as Array<{
     id: string;
@@ -807,10 +817,13 @@ export async function getFinancialPosition(
 
   // --- Payables -------------------------------------------------------------
 
+  // Scope: Korakuen's own payables only (partner_id IS NULL). Partner-owned
+  // invoices are excluded — they belong to a different consortium member.
   const { data: inReceivedRaw } = await supabase
     .from("incoming_invoices")
     .select("id, contact_id, total_pen, factura_status")
     .eq("factura_status", INCOMING_INVOICE_FACTURA_STATUS.received)
+    .is("partner_id", null)
     .is("deleted_at", null);
   const inReceived = (inReceivedRaw ?? []) as Array<{
     id: string;
@@ -865,12 +878,14 @@ export async function getFinancialPosition(
 
   // --- Chase list -----------------------------------------------------------
 
+  // Chase list is also scoped to Korakuen's own expected invoices.
   const { data: inExpectedRaw } = await supabase
     .from("incoming_invoices")
     .select(
       "id, contact_id, project_id, total_pen, factura_status, notes, created_at, vendor:contacts!incoming_invoices_contact_id_fkey(razon_social)",
     )
     .eq("factura_status", INCOMING_INVOICE_FACTURA_STATUS.expected)
+    .is("partner_id", null)
     .is("deleted_at", null);
   const inExpected = (inExpectedRaw ?? []) as Array<{
     id: string;

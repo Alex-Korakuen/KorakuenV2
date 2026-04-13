@@ -45,7 +45,7 @@ function makeCsv(rows: string[]): string {
 describe("parseCsvPaymentRows", () => {
   it("parses a minimal one-row CSV", () => {
     const csv = makeCsv([
-      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,,OP-445511,false,20512345678,,11800.00,invoice,PRJ-2026-01,F001-00045,,",
+      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,,OP-445511,false,20512345678,,,11800.00,invoice,PRJ-2026-01,F001-00045,,",
     ]);
     const r = parseCsvPaymentRows(csv);
     expect(r.success).toBe(true);
@@ -57,7 +57,7 @@ describe("parseCsvPaymentRows", () => {
 
   it("trims whitespace on values", () => {
     const csv = makeCsv([
-      "  P001  ,2026-04-02, inbound , BCP-PEN-001 ,PEN,,OP-445511,false,20512345678,,11800.00,invoice,PRJ-2026-01,F001-00045,,",
+      "  P001  ,2026-04-02, inbound , BCP-PEN-001 ,PEN,,OP-445511,false,20512345678,,,11800.00,invoice,PRJ-2026-01,F001-00045,,",
     ]);
     const r = parseCsvPaymentRows(csv);
     expect(r.success).toBe(true);
@@ -84,7 +84,7 @@ describe("parseCsvPaymentRows", () => {
   it("discards fully empty lines", () => {
     const csv = [
       CSV_HEADER,
-      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,,OP-445511,false,20512345678,,11800.00,invoice,PRJ-2026-01,F001-00045,,",
+      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,,OP-445511,false,20512345678,,,11800.00,invoice,PRJ-2026-01,F001-00045,,",
       "",
       "",
     ].join("\n");
@@ -96,8 +96,8 @@ describe("parseCsvPaymentRows", () => {
 
   it("assigns row_number starting at 2 (accounting for header)", () => {
     const csv = makeCsv([
-      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,,OP-1,false,20512345678,,11800.00,invoice,PRJ-2026-01,,,",
-      "P002,2026-04-03,outbound,BCP-PEN-001,PEN,,OP-2,false,20498765432,,5900.00,invoice,PRJ-2026-01,,,",
+      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,,OP-1,false,20512345678,,,11800.00,invoice,PRJ-2026-01,,,",
+      "P002,2026-04-03,outbound,BCP-PEN-001,PEN,,OP-2,false,20498765432,,,5900.00,invoice,PRJ-2026-01,,,",
     ]);
     const r = parseCsvPaymentRows(csv);
     expect(r.success).toBe(true);
@@ -114,9 +114,9 @@ describe("parseCsvPaymentRows", () => {
 describe("groupRowsByGroupId", () => {
   it("groups rows sharing a group_id", () => {
     const csv = makeCsv([
-      "P001,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-1,false,20498765432,,5900.00,invoice,PRJ-2026-01,F001-00089,,",
-      "P001,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-1,false,20498765432,,12.50,bank_fee,,,,comision",
-      "P002,2026-04-03,inbound,BCP-PEN-001,PEN,,OP-2,false,20512345678,,11800.00,invoice,PRJ-2026-01,F001-00090,,",
+      "P001,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-1,false,20498765432,,,5900.00,invoice,PRJ-2026-01,F001-00089,,",
+      "P001,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-1,false,20498765432,,,12.50,bank_fee,,,,comision",
+      "P002,2026-04-03,inbound,BCP-PEN-001,PEN,,OP-2,false,20512345678,,,11800.00,invoice,PRJ-2026-01,F001-00090,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     expect(parsed.success).toBe(true);
@@ -129,9 +129,9 @@ describe("groupRowsByGroupId", () => {
 
   it("preserves first-occurrence order", () => {
     const csv = makeCsv([
-      "B,2026-04-02,inbound,BCP-PEN-001,PEN,,X,false,20512345678,,100,invoice,,F001,,",
-      "A,2026-04-02,inbound,BCP-PEN-001,PEN,,Y,false,20512345678,,100,invoice,,F002,,",
-      "B,2026-04-02,inbound,BCP-PEN-001,PEN,,X,false,20512345678,,200,invoice,,F003,,",
+      "B,2026-04-02,inbound,BCP-PEN-001,PEN,,X,false,20512345678,,,100,invoice,,F001,,",
+      "A,2026-04-02,inbound,BCP-PEN-001,PEN,,Y,false,20512345678,,,100,invoice,,F002,,",
+      "B,2026-04-02,inbound,BCP-PEN-001,PEN,,X,false,20512345678,,,200,invoice,,F003,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -141,7 +141,7 @@ describe("groupRowsByGroupId", () => {
 
   it("collects missing group_ids under __missing__", () => {
     const csv = makeCsv([
-      ",2026-04-02,inbound,BCP-PEN-001,PEN,,OP-1,false,20512345678,,100,invoice,,,,",
+      ",2026-04-02,inbound,BCP-PEN-001,PEN,,OP-1,false,20512345678,,,100,invoice,,,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -157,7 +157,7 @@ describe("groupRowsByGroupId", () => {
 describe("buildSubmissionFromGroup — happy paths", () => {
   it("builds a single-line inbound payment", () => {
     const csv = makeCsv([
-      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,,OP-445511,false,20512345678,,11800.00,invoice,PRJ-2026-01,F001-00045,,",
+      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,,OP-445511,false,20512345678,,,11800.00,invoice,PRJ-2026-01,F001-00045,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -179,9 +179,9 @@ describe("buildSubmissionFromGroup — happy paths", () => {
 
   it("builds a 3-line outbound payment with bank fee", () => {
     const csv = makeCsv([
-      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-998877,false,20498765432,,5900.00,invoice,PRJ-2026-01,F001-00089,,",
-      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-998877,false,20498765432,,12.50,bank_fee,,,,comision",
-      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-998877,false,20498765432,,100.00,general,PRJ-2026-01,,materiales,",
+      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-998877,false,20498765432,,,5900.00,invoice,PRJ-2026-01,F001-00089,,",
+      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-998877,false,20498765432,,,12.50,bank_fee,,,,comision",
+      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-998877,false,20498765432,,,100.00,general,PRJ-2026-01,,materiales,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -202,7 +202,7 @@ describe("buildSubmissionFromGroup — happy paths", () => {
 
   it("marks a USD payment with exchange_rate as valid", () => {
     const csv = makeCsv([
-      "P003,2026-04-02,inbound,BCP-USD-001,USD,3.75,OP-5,false,20512345678,,5000.00,invoice,PRJ-2026-01,F001-00050,,",
+      "P003,2026-04-02,inbound,BCP-USD-001,USD,3.75,OP-5,false,20512345678,,,5000.00,invoice,PRJ-2026-01,F001-00050,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -215,7 +215,7 @@ describe("buildSubmissionFromGroup — happy paths", () => {
 
   it("marks a BN detraction as valid when currency=PEN", () => {
     const csv = makeCsv([
-      "P004,2026-04-03,outbound,BN-DET-001,PEN,,DET-4411,true,20498765432,,472.00,detraction,PRJ-2026-01,F001-00089,,",
+      "P004,2026-04-03,outbound,BN-DET-001,PEN,,DET-4411,true,20498765432,,,472.00,detraction,PRJ-2026-01,F001-00089,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -234,8 +234,8 @@ describe("buildSubmissionFromGroup — happy paths", () => {
 describe("buildSubmissionFromGroup — structural errors", () => {
   it("flags inconsistent header across rows of a group", () => {
     const csv = makeCsv([
-      "P001,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-1,false,20498765432,,5900.00,invoice,PRJ-2026-01,F001-00089,,",
-      "P001,2026-04-02,outbound,BCP-USD-001,PEN,,TRF-1,false,20498765432,,12.50,bank_fee,,,,",
+      "P001,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-1,false,20498765432,,,5900.00,invoice,PRJ-2026-01,F001-00089,,",
+      "P001,2026-04-02,outbound,BCP-USD-001,PEN,,TRF-1,false,20498765432,,,12.50,bank_fee,,,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -249,7 +249,7 @@ describe("buildSubmissionFromGroup — structural errors", () => {
 
   it("flags missing group_id", () => {
     const csv = makeCsv([
-      ",2026-04-02,inbound,BCP-PEN-001,PEN,,OP-1,false,20512345678,,100,invoice,,,,",
+      ",2026-04-02,inbound,BCP-PEN-001,PEN,,OP-1,false,20512345678,,,100,invoice,,,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -285,6 +285,8 @@ function baseData(
       is_detraction: false,
       contact_ruc: "20512345678",
       contact_id: null,
+      partner_ruc: null,
+      partner_id: null,
       project_code: "PRJ-2026-01",
       project_id: null,
       notes: null,
@@ -870,6 +872,7 @@ describe("editor field config completeness", () => {
       "bank_reference",
       "is_detraction",
       "contact_ruc",
+      "partner_ruc",
       "project_code",
       "notes",
     ];

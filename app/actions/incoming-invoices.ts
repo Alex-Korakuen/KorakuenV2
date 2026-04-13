@@ -484,6 +484,7 @@ export async function createIncomingInvoice(
   const insertPayload = {
     project_id: data.project_id ?? null,
     contact_id: data.contact_id,
+    partner_id: data.partner_id ?? null,
     incoming_quote_id: data.incoming_quote_id ?? null,
     cost_category_id: data.cost_category_id ?? null,
     factura_status: facturaStatus,

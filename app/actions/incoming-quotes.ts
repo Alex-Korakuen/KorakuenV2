@@ -399,6 +399,7 @@ export async function createIncomingQuote(
   const insertPayload = {
     project_id: data.project_id ?? null,
     contact_id: data.contact_id,
+    partner_id: data.partner_id ?? null,
     status: INCOMING_QUOTE_STATUS.draft,
     description: data.description,
     reference: data.reference ?? null,
@@ -720,10 +721,13 @@ export async function trackIncomingQuoteAsExpectedInvoice(
     );
   }
 
-  // Clone the quote into an expected invoice
+  // Clone the quote into an expected invoice. Carry forward the partner
+  // override so the invoice lives under the same consortium member as the
+  // quote it came from.
   const insertPayload = {
     project_id: quote.project_id,
     contact_id: quote.contact_id,
+    partner_id: quote.partner_id,
     incoming_quote_id: quote.id,
     cost_category_id: null,
     factura_status: INCOMING_INVOICE_FACTURA_STATUS.expected,

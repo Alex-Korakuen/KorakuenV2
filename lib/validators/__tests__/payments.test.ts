@@ -30,6 +30,10 @@ function makeHeader(overrides?: Partial<CreatePaymentInput>): CreatePaymentInput
   return {
     direction: PAYMENT_DIRECTION.inbound,
     bank_account_id: "acc-1",
+    // Every payment must now carry a partner attribution. Tests use a dummy
+    // UUID; the real FK liveness check lives in the server action, not the
+    // pure validator.
+    paid_by_partner_id: "00000000-0000-0000-0000-000000000aaa",
     currency: "PEN",
     payment_date: "2026-04-11",
     ...overrides,
@@ -73,7 +77,7 @@ function makePaymentRow(overrides?: Partial<PaymentRow>): PaymentRow {
     bank_account_id: "acc-1",
     project_id: null,
     contact_id: null,
-    paid_by_partner_id: null,
+    paid_by_partner_id: "00000000-0000-0000-0000-000000000aaa",
     total_amount: 100,
     currency: "PEN",
     exchange_rate: null,
@@ -144,7 +148,9 @@ describe("validateCreatePayment — header rules", () => {
     expect(result.success).toBe(true);
   });
 
-  it("rejects paid_by_partner_id on inbound payment", () => {
+  it("accepts paid_by_partner_id on inbound payment", () => {
+    // Both directions now require partner attribution — an inbound payment
+    // to Partner B's account is Partner B's collection for settlement.
     const result = validateCreatePayment(
       makeHeader({
         direction: PAYMENT_DIRECTION.inbound,
@@ -152,10 +158,7 @@ describe("validateCreatePayment — header rules", () => {
       }),
       [makeLine()],
     );
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.fields?.paid_by_partner_id).toBeDefined();
-    }
+    expect(result.success).toBe(true);
   });
 
   it("accepts paid_by_partner_id on outbound payment", () => {
@@ -167,6 +170,18 @@ describe("validateCreatePayment — header rules", () => {
       [makeLine()],
     );
     expect(result.success).toBe(true);
+  });
+
+  it("rejects missing paid_by_partner_id", () => {
+    const result = validateCreatePayment(
+      // Cast through unknown so we can force-omit a now-required field
+      makeHeader({ paid_by_partner_id: undefined as unknown as string }),
+      [makeLine()],
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.fields?.paid_by_partner_id).toBeDefined();
+    }
   });
 
   it("rejects missing payment_date", () => {

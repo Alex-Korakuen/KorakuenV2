@@ -405,6 +405,7 @@ export async function createOutgoingQuote(
   const insertPayload = {
     project_id: data.project_id,
     contact_id: data.contact_id,
+    partner_id: data.partner_id ?? null,
     quote_number: quoteNumber,
     issue_date: data.issue_date,
     valid_until: data.valid_until ?? null,

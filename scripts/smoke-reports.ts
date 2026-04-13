@@ -465,7 +465,7 @@ async function insertPayment(
     bankAccountId: string;
     projectId?: string | null;
     contactId?: string | null;
-    paidByPartnerId?: string | null;
+    paidByPartnerId: string;
     paymentDate: string;
     lines: Array<{
       amountPen: number;
@@ -496,7 +496,7 @@ async function insertPayment(
       bank_account_id: opts.bankAccountId,
       project_id: opts.projectId ?? null,
       contact_id: opts.contactId ?? null,
-      paid_by_partner_id: opts.paidByPartnerId ?? null,
+      paid_by_partner_id: opts.paidByPartnerId,
       total_amount: totalAmountPen,
       currency: "PEN",
       total_amount_pen: totalAmountPen,
@@ -684,6 +684,7 @@ async function setup(supabase: SupabaseClient): Promise<Fixtures> {
       bankAccountId: regularBankId,
       projectId,
       contactId: clientContactId,
+      paidByPartnerId: partnerAContactId,
       paymentDate: today(),
       lines: [
         {

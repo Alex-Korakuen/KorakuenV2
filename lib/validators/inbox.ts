@@ -44,6 +44,7 @@ export const CSV_HEADER_COLUMNS = [
   "bank_reference",
   "is_detraction",
   "contact_ruc",
+  "partner_ruc",
   "notes",
   "line_amount",
   "line_type",
@@ -66,6 +67,7 @@ export type RawCsvRow = {
   bank_reference: string;
   is_detraction: string;
   contact_ruc: string;
+  partner_ruc: string;
   notes: string;
   line_amount: string;
   line_type: string;
@@ -129,6 +131,7 @@ export function parseCsvPaymentRows(
       bank_reference: (raw.bank_reference ?? "").toString(),
       is_detraction: (raw.is_detraction ?? "").toString(),
       contact_ruc: (raw.contact_ruc ?? "").toString(),
+      partner_ruc: (raw.partner_ruc ?? "").toString(),
       notes: (raw.notes ?? "").toString(),
       line_amount: (raw.line_amount ?? "").toString(),
       line_type: (raw.line_type ?? "").toString(),
@@ -212,6 +215,8 @@ export function buildSubmissionFromGroup(
     is_detraction: parseBoolean(first.is_detraction),
     contact_ruc: first.contact_ruc || null,
     contact_id: null,
+    partner_ruc: first.partner_ruc || null,
+    partner_id: null,
     project_code: first.project_code || null,
     project_id: null,
     notes: first.notes || null,
@@ -237,6 +242,7 @@ export function buildSubmissionFromGroup(
     "bank_reference",
     "is_detraction",
     "contact_ruc",
+    "partner_ruc",
     "notes",
   ] as const;
   for (let i = 1; i < rows.length; i++) {
@@ -339,6 +345,16 @@ export function validatePaymentSubmissionData(
     errors.push({
       path: "header.contact_ruc",
       message: "El RUC debe tener 8 u 11 dígitos",
+    });
+  }
+
+  // partner_ruc is optional at the Inbox level — if blank, the approval path
+  // defaults to the is_self contact (Korakuen). If supplied, it must be a
+  // valid-looking RUC so downstream resolution can match it to a contact.
+  if (h.partner_ruc && !/^\d{8}$|^\d{11}$/.test(h.partner_ruc)) {
+    errors.push({
+      path: "header.partner_ruc",
+      message: "El RUC del partner debe tener 8 u 11 dígitos",
     });
   }
 
@@ -583,6 +599,25 @@ export function resolveHeaderLabelsToIds(
     header.contact_id = null;
   }
 
+  // Partner: resolve the optional partner_ruc to a contact id. A blank value
+  // is NOT an error here — the caller (app/actions/inbox.ts) falls back to
+  // the is_self contact when the id is null at approval time. An unknown
+  // non-blank RUC IS surfaced so the user sees a clear fix path.
+  if (header.partner_ruc) {
+    const found = refs.contactsByRuc.get(header.partner_ruc);
+    if (found) {
+      header.partner_id = found.id;
+    } else {
+      header.partner_id = null;
+      errors.push({
+        path: "header.partner_ruc",
+        message: `Partner con RUC "${header.partner_ruc}" no encontrado`,
+      });
+    }
+  } else {
+    header.partner_id = null;
+  }
+
   return errors;
 }
 
@@ -598,6 +633,7 @@ export const HEADER_EDITABLE_FIELDS = [
   "bank_reference",
   "is_detraction",
   "contact_ruc",
+  "partner_ruc",
   "project_code",
   "notes",
 ] as const;
@@ -683,6 +719,8 @@ export function applyPatchToExtractedData(
           incoming_invoice_id: null,
           invoice_number_hint: null,
         }));
+      } else if (patch.field === "partner_ruc") {
+        next.header.partner_id = null;
       }
       return success(next);
     }
@@ -761,6 +799,7 @@ function coerceHeaderValue(
     case "bank_account_label":
     case "bank_reference":
     case "contact_ruc":
+    case "partner_ruc":
     case "project_code":
     case "notes":
       return success(value == null ? null : String(value).trim() || null);
@@ -918,6 +957,8 @@ function blankHeader(): PaymentSubmissionHeader {
     is_detraction: false,
     contact_ruc: null,
     contact_id: null,
+    partner_ruc: null,
+    partner_id: null,
     project_code: null,
     project_id: null,
     notes: null,

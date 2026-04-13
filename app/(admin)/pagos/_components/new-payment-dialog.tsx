@@ -21,12 +21,13 @@ import {
 import { ContactPicker } from "@/components/widgets/contact-picker";
 import { ProjectPicker } from "@/components/widgets/project-picker";
 import { BankAccountPicker } from "@/components/widgets/bank-account-picker";
+import { PartnerPicker } from "@/components/widgets/partner-picker";
 import { createPayment } from "@/app/actions/payments";
 import { PAYMENT_DIRECTION, PAYMENT_LINE_TYPE } from "@/lib/types";
 import { roundMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import type { BankAccountRow, ProjectRow } from "@/lib/types";
+import type { BankAccountRow, ProjectRow, ContactRow } from "@/lib/types";
 
 type LineDraft = {
   key: string;
@@ -69,6 +70,7 @@ export function NewPaymentDialog({ children }: { children: ReactNode }) {
   );
   const [currency, setCurrency] = useState<"PEN" | "USD">("PEN");
   const [contactId, setContactId] = useState<string | null>(null);
+  const [partner, setPartner] = useState<ContactRow | null>(null);
   const [project, setProject] = useState<ProjectRow | null>(null);
   const [bankReference, setBankReference] = useState("");
   const [title, setTitle] = useState("");
@@ -80,6 +82,7 @@ export function NewPaymentDialog({ children }: { children: ReactNode }) {
     setPaymentDate(new Date().toISOString().split("T")[0]);
     setCurrency("PEN");
     setContactId(null);
+    setPartner(null);
     setProject(null);
     setBankReference("");
     setTitle("");
@@ -107,6 +110,10 @@ export function NewPaymentDialog({ children }: { children: ReactNode }) {
       toast.error("Selecciona una cuenta bancaria");
       return;
     }
+    if (!partner) {
+      toast.error("Selecciona el partner al que se atribuye el pago");
+      return;
+    }
     const cleanLines = lines.filter((l) => parseNum(l.amount) > 0);
     if (cleanLines.length === 0) {
       toast.error("Agrega al menos una línea con monto");
@@ -121,7 +128,7 @@ export function NewPaymentDialog({ children }: { children: ReactNode }) {
         bank_account_id: bankAccount.id,
         project_id: project?.id ?? null,
         contact_id: contactId,
-        paid_by_partner_id: null,
+        paid_by_partner_id: partner.id,
         currency,
         payment_date: paymentDate,
         bank_reference: bankReference.trim() || null,
@@ -279,6 +286,23 @@ export function NewPaymentDialog({ children }: { children: ReactNode }) {
                   onChange={(e) => setBankReference(e.target.value)}
                   placeholder="88102"
                   className="mt-0.5 font-mono"
+                />
+              </div>
+            </div>
+
+            {/* Row 3: Partner attribution (required — drives settlement math) */}
+            <div className="mt-3 grid grid-cols-12 gap-3">
+              <div className="col-span-6">
+                <label className="text-[11px] text-muted-foreground">
+                  Atribuido a{" "}
+                  <span className="text-muted-foreground/60">
+                    (partner que {direction === PAYMENT_DIRECTION.inbound ? "cobra" : "paga"})
+                  </span>
+                </label>
+                <PartnerPicker
+                  value={partner?.id ?? null}
+                  onChange={setPartner}
+                  className="mt-0.5"
                 />
               </div>
             </div>

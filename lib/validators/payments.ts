@@ -42,9 +42,12 @@ export function validateCreatePayment(
 
   Object.assign(fields, validateCurrencyExchangeRate(data.currency, data.exchange_rate));
 
-  // paid_by_partner_id only allowed on outbound (DB constraint: pay_direction_partner)
-  if (data.paid_by_partner_id && data.direction !== PAYMENT_DIRECTION.outbound) {
-    fields.paid_by_partner_id = "Only allowed on outbound payments";
+  // Every payment must be attributed to one of the consortium partners —
+  // the one whose cash went out (outbound) or was collected (inbound). This
+  // drives the settlement formula in getSettlement. The old outbound-only
+  // restriction was dropped in migration 20260413000003_partner_attribution.
+  if (!data.paid_by_partner_id) {
+    fields.paid_by_partner_id = "Required — every payment must be attributed to a partner";
   }
 
   if (!data.payment_date) {

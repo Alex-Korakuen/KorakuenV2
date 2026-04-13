@@ -266,6 +266,7 @@ export type OutgoingQuoteRow = {
   id: string;
   project_id: string;
   contact_id: string;
+  partner_id: string | null;
   status: number;
   quote_number: string | null;
   issue_date: string;
@@ -286,6 +287,7 @@ export type OutgoingQuoteRow = {
 export type OutgoingInvoiceRow = {
   id: string;
   project_id: string;
+  partner_id: string | null;
   status: number;
   period_start: string;
   period_end: string;
@@ -325,6 +327,7 @@ export type IncomingQuoteRow = {
   id: string;
   project_id: string | null;
   contact_id: string;
+  partner_id: string | null;
   status: number;
   description: string;
   reference: string | null;
@@ -348,6 +351,7 @@ export type IncomingInvoiceRow = {
   id: string;
   project_id: string | null;
   contact_id: string;
+  partner_id: string | null;
   incoming_quote_id: string | null;
   cost_category_id: string | null;
   factura_status: number;
@@ -405,7 +409,7 @@ export type PaymentRow = {
   bank_account_id: string;
   project_id: string | null;
   contact_id: string | null;
-  paid_by_partner_id: string | null;
+  paid_by_partner_id: string;
   total_amount: number;
   currency: string;
   exchange_rate: number | null;
@@ -538,6 +542,8 @@ export type DocumentTotals = {
 export type CreateOutgoingQuoteInput = {
   project_id: string;
   contact_id: string;
+  // Optional partner override. null = Korakuen (default).
+  partner_id?: string | null;
   quote_number?: string | null;
   issue_date: string;
   valid_until?: string | null;
@@ -549,6 +555,7 @@ export type CreateOutgoingQuoteInput = {
 
 export type UpdateOutgoingQuoteInput = {
   contact_id?: string;
+  partner_id?: string | null;
   issue_date?: string;
   valid_until?: string | null;
   currency?: string;
@@ -576,6 +583,10 @@ export type OutgoingQuoteLineItemRow = {
 
 export type CreateOutgoingInvoiceInput = {
   project_id: string;
+  // Optional partner override. null = belongs to Korakuen (the 99% default).
+  // A non-null contact id flags the invoice as belonging to one of the other
+  // consortium partners, which excludes it from Korakuen's SUNAT/IGV reports.
+  partner_id?: string | null;
   period_start: string;
   period_end: string;
   issue_date: string;
@@ -594,6 +605,7 @@ export type CreateOutgoingInvoiceInput = {
 
 export type UpdateOutgoingInvoiceInput = {
   // Financial core (draft only)
+  partner_id?: string | null;
   period_start?: string;
   period_end?: string;
   issue_date?: string;
@@ -642,6 +654,8 @@ export type OutgoingInvoiceLineItemRow = {
 export type CreateIncomingQuoteInput = {
   project_id?: string | null;
   contact_id: string;
+  // Optional partner override. null = belongs to Korakuen (99% default).
+  partner_id?: string | null;
   description: string;
   reference?: string | null;
   currency?: string;
@@ -655,6 +669,7 @@ export type CreateIncomingQuoteInput = {
 export type UpdateIncomingQuoteInput = {
   project_id?: string | null;
   contact_id?: string;
+  partner_id?: string | null;
   description?: string;
   reference?: string | null;
   currency?: string;
@@ -693,6 +708,8 @@ export type IncomingInvoiceLineItemInput = LineItemInput & {
 export type CreateIncomingInvoiceInput = {
   project_id?: string | null;
   contact_id: string;
+  // Optional partner override. null = belongs to Korakuen (99% default).
+  partner_id?: string | null;
   incoming_quote_id?: string | null;
   cost_category_id?: string | null;
   // 1 = expected (default), 2 = received. Received requires all SUNAT
@@ -723,6 +740,7 @@ export type UpdateIncomingInvoiceInput = {
   // Financial core (locked once factura_status = received)
   project_id?: string | null;
   contact_id?: string;
+  partner_id?: string | null;
   currency?: string;
   exchange_rate?: number | null;
   subtotal?: number;
@@ -780,7 +798,7 @@ export type CreatePaymentInput = {
   bank_account_id: string;
   project_id?: string | null;
   contact_id?: string | null;
-  paid_by_partner_id?: string | null;
+  paid_by_partner_id: string;
   currency?: string;
   exchange_rate?: number | null;
   is_detraction?: boolean;
@@ -868,6 +886,11 @@ export type PaymentSubmissionHeader = {
   is_detraction: boolean;
   contact_ruc: string | null;
   contact_id: string | null;
+  // Partner attribution — which consortium member this payment is
+  // attributed to for settlement math. Resolved from partner_ruc at
+  // approval time; defaults to the is_self row (Korakuen) if blank.
+  partner_ruc: string | null;
+  partner_id: string | null;
   project_code: string | null;
   project_id: string | null;
   notes: string | null;

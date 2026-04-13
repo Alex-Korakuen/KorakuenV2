@@ -95,7 +95,7 @@ export type UpdatePaymentInput = {
   notes?: string | null;
   project_id?: string | null;
   contact_id?: string | null;
-  paid_by_partner_id?: string | null;
+  paid_by_partner_id?: string;
   drive_file_id?: string | null;
 };
 
@@ -471,6 +471,25 @@ export async function updatePayment(
     return updateCheck as ValidationResult<PaymentWithLinesAndComputed>;
   }
 
+  if (patch.paid_by_partner_id !== undefined) {
+    const { data: partnerRow, error: lookupError } = await supabase
+      .from("contacts")
+      .select("id, is_partner, deleted_at")
+      .eq("id", patch.paid_by_partner_id)
+      .maybeSingle();
+    if (lookupError) return failure("VALIDATION_ERROR", lookupError.message);
+    if (!partnerRow || partnerRow.deleted_at) {
+      return failure("VALIDATION_ERROR", "Partner contact not found", {
+        paid_by_partner_id: "Partner contact not found",
+      });
+    }
+    if (!partnerRow.is_partner) {
+      return failure("VALIDATION_ERROR", "Referenced contact is not a partner", {
+        paid_by_partner_id: "Contact does not have is_partner = true",
+      });
+    }
+  }
+
   const { error: updateError } = await supabase
     .from("payments")
     .update({ ...patch, updated_at: nowISO() })
@@ -544,6 +563,29 @@ export async function createPayment(
   const bankCheck = validateBankAccountConsistency(data, bankAccount);
   if (!bankCheck.success) {
     return bankCheck as ValidationResult<PaymentWithLinesAndComputed>;
+  }
+
+  // Every payment must be attributed to a consortium partner. Verify the
+  // referenced contact exists and actually carries is_partner=true, so we
+  // catch a stale UUID or the wrong contact type before the FK insert.
+  const { data: partnerRow, error: partnerLookupError } = await supabase
+    .from("contacts")
+    .select("id, is_partner, deleted_at")
+    .eq("id", data.paid_by_partner_id)
+    .maybeSingle();
+
+  if (partnerLookupError) {
+    return failure("VALIDATION_ERROR", partnerLookupError.message);
+  }
+  if (!partnerRow || partnerRow.deleted_at) {
+    return failure("VALIDATION_ERROR", "Partner contact not found", {
+      paid_by_partner_id: "Partner contact not found",
+    });
+  }
+  if (!partnerRow.is_partner) {
+    return failure("VALIDATION_ERROR", "Referenced contact is not a partner", {
+      paid_by_partner_id: "Contact does not have is_partner = true",
+    });
   }
 
   const isDetraction = deriveIsDetraction(bankAccount);
@@ -623,7 +665,7 @@ export async function createPayment(
     bank_account_id: data.bank_account_id,
     project_id: data.project_id ?? null,
     contact_id: data.contact_id ?? null,
-    paid_by_partner_id: data.paid_by_partner_id ?? null,
+    paid_by_partner_id: data.paid_by_partner_id,
     total_amount: totalAmount,
     currency,
     exchange_rate: exchangeRate,

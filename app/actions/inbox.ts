@@ -48,6 +48,7 @@ import {
 import { findOrCreateContactByRuc } from "./contacts";
 import { createPayment } from "./payments";
 import { requireExactExchangeRate } from "@/lib/exchange-rate";
+import { getSelfContact } from "@/lib/self";
 import { computeOutgoingInvoicePaymentProgressBatch } from "@/lib/outgoing-invoice-computed";
 import { computeIncomingInvoicePaymentProgressBatch } from "@/lib/incoming-invoice-computed";
 
@@ -956,6 +957,46 @@ async function buildCreatePaymentInputFromSubmission(
     });
   }
 
+  // Resolve the partner attribution: if the CSV supplied a partner_ruc it
+  // was already matched to a partner_id by resolveHeaderLabelsToIds. If it
+  // didn't, fall back to the is_self contact (Korakuen). Either way, the
+  // resolved contact must actually carry is_partner=true — the DB NOT NULL
+  // constraint will be enforced below.
+  const supabaseForPartner = await createServerClient();
+  let resolvedPartnerId: string | null = h.partner_id;
+  if (!resolvedPartnerId) {
+    const self = await getSelfContact(supabaseForPartner);
+    if (!self) {
+      return failure(
+        "VALIDATION_ERROR",
+        "No se encontró el contacto is_self (Korakuen). Registre el contacto propio antes de aprobar pagos.",
+        { "header.partner_ruc": "Missing is_self contact" },
+      );
+    }
+    resolvedPartnerId = self.id;
+  }
+
+  // Final liveness + is_partner check on the resolved contact. This catches
+  // a partner_ruc that matches a non-partner contact (e.g. a vendor that
+  // happens to share the RUC) before we hand off to createPayment.
+  const { data: partnerCheck } = await supabaseForPartner
+    .from("contacts")
+    .select("id, is_partner, deleted_at")
+    .eq("id", resolvedPartnerId)
+    .maybeSingle();
+  if (!partnerCheck || partnerCheck.deleted_at) {
+    return failure("VALIDATION_ERROR", "Partner contact no encontrado", {
+      "header.partner_ruc": "Partner contact not found",
+    });
+  }
+  if (!partnerCheck.is_partner) {
+    return failure(
+      "VALIDATION_ERROR",
+      "El contacto referido no está marcado como partner",
+      { "header.partner_ruc": "Contact does not have is_partner = true" },
+    );
+  }
+
   const directionCode =
     h.direction === "inbound"
       ? PAYMENT_DIRECTION.inbound
@@ -982,6 +1023,7 @@ async function buildCreatePaymentInputFromSubmission(
     bank_account_id: h.bank_account_id,
     project_id: h.project_id,
     contact_id: h.contact_id,
+    paid_by_partner_id: resolvedPartnerId,
     currency: h.currency,
     exchange_rate: resolvedExchangeRate,
     payment_date: h.payment_date,

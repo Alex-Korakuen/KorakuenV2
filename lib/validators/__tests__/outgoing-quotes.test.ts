@@ -36,6 +36,7 @@ function makeQuote(overrides?: Partial<OutgoingQuoteRow>): OutgoingQuoteRow {
     id: "00000000-0000-0000-0000-000000000099",
     project_id: "00000000-0000-0000-0000-000000000001",
     contact_id: "00000000-0000-0000-0000-000000000002",
+    partner_id: null,
     status: OUTGOING_QUOTE_STATUS.draft,
     quote_number: "COT-2026-0001",
     issue_date: "2026-04-10",

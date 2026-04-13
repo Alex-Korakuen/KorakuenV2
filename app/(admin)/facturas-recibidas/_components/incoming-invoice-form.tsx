@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import { ContactPicker } from "@/components/widgets/contact-picker";
 import { ProjectPicker } from "@/components/widgets/project-picker";
+import { PartnerPicker } from "@/components/widgets/partner-picker";
 import {
   createIncomingInvoice,
   updateIncomingInvoice,
@@ -96,6 +97,9 @@ export function IncomingInvoiceForm({
     (invoice?.currency as "PEN" | "USD") ?? "PEN",
   );
   const [notes, setNotes] = useState(invoice?.notes ?? "");
+  const [partnerId, setPartnerId] = useState<string | null>(
+    invoice?.partner_id ?? null,
+  );
 
   // SUNAT
   const [serie, setSerie] = useState(
@@ -236,6 +240,7 @@ export function IncomingInvoiceForm({
       const result = await createIncomingInvoice({
         contact_id: vendorId,
         project_id: project?.id ?? null,
+        partner_id: partnerId,
         factura_status: facturaStatus,
         currency,
         subtotal: totals.subtotal,
@@ -270,6 +275,7 @@ export function IncomingInvoiceForm({
     // Edit flow
     const headerResult = await updateIncomingInvoice(invoice.id, {
       project_id: project?.id ?? null,
+      partner_id: partnerId,
       currency,
       detraction_rate: detraccionEnabled ? parseNum(detraccionRate) : null,
       detraction_amount: detraccionEnabled ? totals.detraccion : null,
@@ -355,6 +361,23 @@ export function IncomingInvoiceForm({
                 className="mt-0.5"
               />
             </div>
+          </div>
+
+          {/* Partner override — blank = Korakuen (99% default) */}
+          <div className="mt-3">
+            <label className="text-[11px] text-muted-foreground">
+              Pertenece a{" "}
+              <span className="text-muted-foreground/60">
+                (dejar vacío para Korakuen)
+              </span>
+            </label>
+            <PartnerPicker
+              value={partnerId}
+              onChange={(p) => setPartnerId(p?.id ?? null)}
+              autoDefault={false}
+              placeholder="Korakuen (por defecto)"
+              className="mt-0.5"
+            />
           </div>
 
           {/* Row 2: Estado + Fecha + Moneda */}

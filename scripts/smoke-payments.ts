@@ -108,6 +108,7 @@ function assertTrue(label: string, condition: boolean): void {
 type Fixtures = {
   clientContactId: string;
   vendorContactId: string;
+  selfPartnerId: string;
   projectId: string;
   regularBankId: string;
   bnBankId: string;
@@ -396,6 +397,20 @@ async function setup(supabase: SupabaseClient): Promise<Fixtures> {
   const projectId = await insertProject(supabase, clientContactId);
   const insertedExchangeRateId = await ensureExchangeRate(supabase);
 
+  // Every payment must be attributed to a consortium partner. Use
+  // Korakuen's own is_self row as the default partner for smoke payments.
+  const { data: selfRow, error: selfErr } = await supabase
+    .from("contacts")
+    .select("id")
+    .eq("is_self", true)
+    .maybeSingle();
+  if (selfErr || !selfRow) {
+    throw new Error(
+      `setup: cannot find is_self contact — seed Korakuen first (scripts/seed-self-contact.ts): ${selfErr?.message ?? "no row"}`,
+    );
+  }
+  const selfPartnerId = selfRow.id as string;
+
   const outgoingPenInvoiceId = await insertOutgoingInvoice(supabase, {
     projectId,
     currency: "PEN",
@@ -421,6 +436,7 @@ async function setup(supabase: SupabaseClient): Promise<Fixtures> {
   return {
     clientContactId,
     vendorContactId,
+    selfPartnerId,
     projectId,
     regularBankId,
     bnBankId,
@@ -440,6 +456,7 @@ async function createPayment(
   opts: {
     direction: number;
     bankAccountId: string;
+    paidByPartnerId: string;
     projectId?: string | null;
     contactId?: string | null;
     currency?: string;
@@ -480,6 +497,7 @@ async function createPayment(
       bank_account_id: opts.bankAccountId,
       project_id: opts.projectId ?? null,
       contact_id: opts.contactId ?? null,
+      paid_by_partner_id: opts.paidByPartnerId,
       total_amount: totalAmount,
       currency: opts.currency ?? "PEN",
       exchange_rate: opts.exchangeRate ?? null,
@@ -598,6 +616,7 @@ const scenarios: Scenario[] = [
       await createPayment(supabase, {
         direction: PAYMENT_DIRECTION.inbound,
         bankAccountId: fx.regularBankId,
+        paidByPartnerId: fx.selfPartnerId,
         projectId: fx.projectId,
         contactId: fx.clientContactId,
         paymentDate: today(),
@@ -628,6 +647,7 @@ const scenarios: Scenario[] = [
       await createPayment(supabase, {
         direction: PAYMENT_DIRECTION.outbound,
         bankAccountId: fx.regularBankId,
+        paidByPartnerId: fx.selfPartnerId,
         projectId: fx.projectId,
         paymentDate: today(),
         notes: `${SMOKE_MARKER} self-detracción leg 1`,
@@ -659,6 +679,7 @@ const scenarios: Scenario[] = [
       const result = await createPayment(supabase, {
         direction: PAYMENT_DIRECTION.inbound,
         bankAccountId: fx.bnBankId,
+        paidByPartnerId: fx.selfPartnerId,
         projectId: fx.projectId,
         paymentDate: today(),
         notes: `${SMOKE_MARKER} self-detracción leg 2`,
@@ -699,6 +720,7 @@ const scenarios: Scenario[] = [
       await createPayment(supabase, {
         direction: PAYMENT_DIRECTION.inbound,
         bankAccountId: fx.bnBankId,
+        paidByPartnerId: fx.selfPartnerId,
         projectId: fx.projectId,
         paymentDate: today(),
         notes: `${SMOKE_MARKER} S4 — USD invoice detracción`,
@@ -755,6 +777,7 @@ const scenarios: Scenario[] = [
       const result = await createPayment(supabase, {
         direction: PAYMENT_DIRECTION.outbound,
         bankAccountId: fx.regularBankId,
+        paidByPartnerId: fx.selfPartnerId,
         projectId: fx.projectId,
         contactId: fx.vendorContactId,
         paymentDate: today(),

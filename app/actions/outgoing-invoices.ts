@@ -340,6 +340,7 @@ export async function createOutgoingInvoice(
   // Insert header with zero totals (line items + recompute will fix them)
   const insertPayload = {
     project_id: data.project_id,
+    partner_id: data.partner_id ?? null,
     period_start: data.period_start,
     period_end: data.period_end,
     issue_date: data.issue_date,

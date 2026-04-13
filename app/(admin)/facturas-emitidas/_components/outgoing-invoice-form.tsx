@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ChevronDown, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProjectPicker } from "@/components/widgets/project-picker";
+import { PartnerPicker } from "@/components/widgets/partner-picker";
 import {
   createOutgoingInvoice,
   updateOutgoingInvoice,
@@ -82,6 +83,10 @@ export function OutgoingInvoiceForm({
   const [periodStart, setPeriodStart] = useState(invoice?.period_start ?? "");
   const [periodEnd, setPeriodEnd] = useState(invoice?.period_end ?? "");
   const [notes, setNotes] = useState(invoice?.notes ?? "");
+  // Partner override: null = belongs to Korakuen (99% default).
+  const [partnerId, setPartnerId] = useState<string | null>(
+    invoice?.partner_id ?? null,
+  );
 
   const [lines, setLines] = useState<LineItemDraft[]>(() => {
     if (existingLineItems && existingLineItems.length > 0) {
@@ -217,6 +222,7 @@ export function OutgoingInvoiceForm({
     if (!isEdit) {
       const result = await createOutgoingInvoice({
         project_id: project.id,
+        partner_id: partnerId,
         period_start: periodStart,
         period_end: periodEnd,
         issue_date: issueDate,
@@ -259,6 +265,7 @@ export function OutgoingInvoiceForm({
 
     // Edit flow
     const headerResult = await updateOutgoingInvoice(invoice.id, {
+      partner_id: partnerId,
       period_start: periodStart,
       period_end: periodEnd,
       issue_date: issueDate,
@@ -380,6 +387,23 @@ export function OutgoingInvoiceForm({
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="4to avance · hito de entrega"
                 className="mt-0.5 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:border-primary/50"
+              />
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-4 gap-3">
+            <div className="col-span-2">
+              <label className="text-[11px] text-muted-foreground">
+                Pertenece a{" "}
+                <span className="text-muted-foreground/60">
+                  (dejar vacío para Korakuen)
+                </span>
+              </label>
+              <PartnerPicker
+                value={partnerId}
+                onChange={(p) => setPartnerId(p?.id ?? null)}
+                autoDefault={false}
+                placeholder="Korakuen (por defecto)"
+                className="mt-0.5"
               />
             </div>
           </div>

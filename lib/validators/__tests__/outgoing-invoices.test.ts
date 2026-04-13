@@ -41,6 +41,7 @@ function makeInvoice(
   return {
     id: "00000000-0000-0000-0000-000000000099",
     project_id: "00000000-0000-0000-0000-000000000001",
+    partner_id: null,
     status: OUTGOING_INVOICE_STATUS.draft,
     period_start: "2026-04-01",
     period_end: "2026-04-15",
