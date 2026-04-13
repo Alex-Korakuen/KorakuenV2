@@ -91,7 +91,7 @@ function makePaymentRow(overrides?: Partial<PaymentRow>): PaymentRow {
     submission_id: null,
     drive_file_id: null,
     payment_date: "2026-04-11",
-    notes: null,
+    title: null,
     created_at: "2026-04-11T00:00:00Z",
     updated_at: "2026-04-11T00:00:00Z",
     deleted_at: null,
@@ -494,7 +494,7 @@ describe("validateUpdatePayment", () => {
       {
         payment_date: "2026-04-12",
         bank_reference: "TRF-00293847",
-        notes: "Test note",
+        title: "Test title",
       },
       existing,
     );

@@ -462,7 +462,7 @@ async function createPayment(
     currency?: string;
     exchangeRate?: number | null;
     paymentDate: string;
-    notes?: string;
+    title?: string;
     lines: Array<{
       amount: number;
       amountPen: number;
@@ -504,7 +504,7 @@ async function createPayment(
       total_amount_pen: totalAmountPen,
       is_detraction: isDetraction,
       payment_date: opts.paymentDate,
-      notes: opts.notes ?? SMOKE_MARKER,
+      title: opts.title ?? SMOKE_MARKER,
       source: 1,
     })
     .select("id")
@@ -650,7 +650,7 @@ const scenarios: Scenario[] = [
         paidByPartnerId: fx.selfPartnerId,
         projectId: fx.projectId,
         paymentDate: today(),
-        notes: `${SMOKE_MARKER} self-detracción leg 1`,
+        title: `${SMOKE_MARKER} self-detracción leg 1`,
         lines: [
           {
             amount: 1200,
@@ -682,7 +682,7 @@ const scenarios: Scenario[] = [
         paidByPartnerId: fx.selfPartnerId,
         projectId: fx.projectId,
         paymentDate: today(),
-        notes: `${SMOKE_MARKER} self-detracción leg 2`,
+        title: `${SMOKE_MARKER} self-detracción leg 2`,
         lines: [
           {
             amount: 1200,
@@ -723,7 +723,7 @@ const scenarios: Scenario[] = [
         paidByPartnerId: fx.selfPartnerId,
         projectId: fx.projectId,
         paymentDate: today(),
-        notes: `${SMOKE_MARKER} S4 — USD invoice detracción`,
+        title: `${SMOKE_MARKER} S4 — USD invoice detracción`,
         lines: [
           {
             amount: 380,
@@ -781,7 +781,7 @@ const scenarios: Scenario[] = [
         projectId: fx.projectId,
         contactId: fx.vendorContactId,
         paymentDate: today(),
-        notes: `${SMOKE_MARKER} S5 — auto-split overflow`,
+        title: `${SMOKE_MARKER} S5 — auto-split overflow`,
         lines: [
           {
             amount: decision.fillAmount,

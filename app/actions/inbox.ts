@@ -1029,7 +1029,7 @@ async function buildCreatePaymentInputFromSubmission(
     exchange_rate: resolvedExchangeRate,
     payment_date: h.payment_date,
     bank_reference: h.bank_reference,
-    notes: h.notes,
+    title: h.title,
     source: SOURCE.csv_import,
     submission_id: submissionId,
   };
@@ -1052,7 +1052,7 @@ async function buildCreatePaymentInputFromSubmission(
           : null,
       cost_category_id: l.cost_category_id ?? null,
       line_type: paymentLineTypeToCode(l.line_type),
-      notes: l.notes,
+      description: l.description,
     };
   });
 

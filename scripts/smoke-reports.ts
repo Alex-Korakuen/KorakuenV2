@@ -502,7 +502,7 @@ async function insertPayment(
       total_amount_pen: totalAmountPen,
       is_detraction: isDetraction,
       payment_date: opts.paymentDate,
-      notes: SMOKE_MARKER,
+      title: SMOKE_MARKER,
       source: 1,
     })
     .select("id")

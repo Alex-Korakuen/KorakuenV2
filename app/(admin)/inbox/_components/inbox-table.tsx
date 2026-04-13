@@ -750,23 +750,23 @@ function DetailPanel({
                         }
                       />
                     </td>
-                    {/* Notes */}
+                    {/* Description */}
                     <td className="px-3 py-2">
                       <EditableCell
                         {...editProps}
-                        cellId={cid("notes")}
-                        config={LINE_FIELD_EDITORS.notes}
-                        value={line.notes}
+                        cellId={cid("description")}
+                        config={LINE_FIELD_EDITORS.description}
+                        value={line.description}
                         display={
                           <span className="text-xs text-muted-foreground">
-                            {line.notes ?? "—"}
+                            {line.description ?? "—"}
                           </span>
                         }
                         onSave={(next) =>
-                          onCellPatch(cid("notes"), {
+                          onCellPatch(cid("description"), {
                             kind: "set_line",
                             index: i,
-                            field: "notes",
+                            field: "description",
                             value: next,
                           })
                         }

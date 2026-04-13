@@ -86,13 +86,13 @@ export type PaymentLineSplitInput = {
   incoming_invoice_id?: string | null;
   loan_id?: string | null;
   cost_category_id?: string | null;
-  notes?: string | null;
+  description?: string | null;
 };
 
 export type UpdatePaymentInput = {
   payment_date?: string;
   bank_reference?: string | null;
-  notes?: string | null;
+  title?: string | null;
   project_id?: string | null;
   contact_id?: string | null;
   paid_by_partner_id?: string;
@@ -100,7 +100,7 @@ export type UpdatePaymentInput = {
 };
 
 export type UpdatePaymentLineInput = {
-  notes?: string | null;
+  description?: string | null;
   cost_category_id?: string | null;
 };
 
@@ -673,7 +673,7 @@ export async function createPayment(
     is_detraction: isDetraction,
     bank_reference: data.bank_reference ?? null,
     payment_date: data.payment_date,
-    notes: data.notes ?? null,
+    title: data.title ?? null,
     source: data.source ?? 1,
     submission_id: data.submission_id ?? null,
   };
@@ -704,7 +704,7 @@ export async function createPayment(
     loan_id: l.loan_id ?? null,
     cost_category_id: l.cost_category_id ?? null,
     line_type: l.line_type,
-    notes: l.notes ?? null,
+    description: l.description ?? null,
   }));
 
   const { error: lineError } = await supabase
@@ -751,7 +751,7 @@ export async function updatePaymentLine(
   }
 
   const updatePayload: Record<string, unknown> = { updated_at: nowISO() };
-  if ("notes" in patch) updatePayload.notes = patch.notes ?? null;
+  if ("description" in patch) updatePayload.description = patch.description ?? null;
   if ("cost_category_id" in patch) {
     updatePayload.cost_category_id = patch.cost_category_id ?? null;
   }
@@ -921,7 +921,7 @@ export async function splitPaymentLine(
     loan_id: s.loan_id ?? null,
     cost_category_id: s.cost_category_id ?? null,
     line_type: s.line_type,
-    notes: s.notes ?? null,
+    description: s.description ?? null,
   }));
 
   const { error: insertError } = await supabase
@@ -1053,7 +1053,7 @@ export async function linkPaymentLineToInvoice(
     loan_id: null,
     cost_category_id: line.cost_category_id,
     line_type: PAYMENT_LINE_TYPE.invoice,
-    notes: line.notes,
+    description: line.description,
   };
   const partB = {
     payment_id: parent.id,
@@ -1065,7 +1065,7 @@ export async function linkPaymentLineToInvoice(
     loan_id: null,
     cost_category_id: line.cost_category_id,
     line_type: PAYMENT_LINE_TYPE.general,
-    notes: line.notes,
+    description: line.description,
   };
 
   const { error: deleteError } = await supabase

@@ -423,7 +423,10 @@ export type PaymentRow = {
   submission_id: string | null;
   drive_file_id: string | null;
   payment_date: string;
-  notes: string | null;
+  // Payment-level memo. Mirrors the bank-statement description — the UI
+  // labels this input "Título". Renamed from `notes` in the 20260413000004
+  // migration because the column holds a title/memo, not free-form notes.
+  title: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -450,7 +453,10 @@ export type PaymentLineRow = {
   loan_id: string | null;
   cost_category_id: string | null;
   line_type: number;
-  notes: string | null;
+  // Per-line description — what this slice of the payment settles. Renamed
+  // from `notes` in the 20260413000004 migration; it was always a
+  // description, not free-form notes.
+  description: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -804,7 +810,7 @@ export type CreatePaymentInput = {
   is_detraction?: boolean;
   payment_date: string;
   bank_reference?: string | null;
-  notes?: string | null;
+  title?: string | null;
   source?: number;
   submission_id?: string | null;
 };
@@ -818,7 +824,7 @@ export type CreatePaymentLineInput = {
   loan_id?: string | null;
   cost_category_id?: string | null;
   line_type: number;
-  notes?: string | null;
+  description?: string | null;
 };
 
 export type SunatFieldsInput = {
@@ -893,7 +899,8 @@ export type PaymentSubmissionHeader = {
   partner_id: string | null;
   project_code: string | null;
   project_id: string | null;
-  notes: string | null;
+  // Payment-level memo / bank-statement description (maps to payments.title)
+  title: string | null;
 };
 
 export type PaymentSubmissionLine = {
@@ -910,7 +917,8 @@ export type PaymentSubmissionLine = {
   incoming_invoice_id: string | null;
   cost_category_label: string | null;
   cost_category_id: string | null;
-  notes: string | null;
+  // Per-line description (maps to payment_lines.description)
+  description: string | null;
 };
 
 export type SubmissionFieldError = {

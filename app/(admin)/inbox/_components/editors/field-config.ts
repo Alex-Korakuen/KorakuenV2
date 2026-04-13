@@ -55,7 +55,7 @@ export const HEADER_FIELD_EDITORS = {
   contact_ruc: { kind: "input", inputType: "text", placeholder: "20XXXXXXXXX" },
   partner_ruc: { kind: "input", inputType: "text", placeholder: "RUC del partner (opcional)" },
   project_code: { kind: "combobox", source: "projects" },
-  notes: { kind: "input", inputType: "text" },
+  title: { kind: "input", inputType: "text", placeholder: "texto del estado de cuenta" },
 } as const satisfies Record<string, EditorConfig>;
 
 export const LINE_FIELD_EDITORS = {
@@ -71,7 +71,7 @@ export const LINE_FIELD_EDITORS = {
   },
   invoice_number_hint: { kind: "combobox", source: "invoices" },
   cost_category_label: { kind: "combobox", source: "costCategories" },
-  notes: { kind: "input", inputType: "text" },
+  description: { kind: "input", inputType: "text" },
 } as const satisfies Record<string, EditorConfig>;
 
 // Note: `direction` is intentionally NOT in HEADER_FIELD_EDITORS — it's

@@ -163,7 +163,7 @@ export function PaymentDetailDialog({
           showCloseButton
         >
           <DialogTitle className="sr-only">
-            {payment.notes ?? "Detalle de pago"}
+            {payment.title ?? "Detalle de pago"}
           </DialogTitle>
 
           {/* Header */}
@@ -184,7 +184,7 @@ export function PaymentDetailDialog({
               {isInbound ? "Entrada" : "Salida"}
             </span>
             <h3 className="flex-1 min-w-0 text-base font-semibold text-foreground truncate">
-              {payment.notes ?? "Pago sin título"}
+              {payment.title ?? "Pago sin título"}
             </h3>
             <button
               type="button"
@@ -315,7 +315,7 @@ export function PaymentDetailDialog({
                           </td>
                           <td className="px-3 py-2 overflow-hidden">
                             <p className="truncate text-sm text-foreground">
-                              {line.notes ?? "—"}
+                              {line.description ?? "—"}
                             </p>
                           </td>
                           <td className="px-3 py-2 text-right tabular-nums font-mono text-sm whitespace-nowrap">

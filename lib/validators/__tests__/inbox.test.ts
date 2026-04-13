@@ -289,7 +289,7 @@ function baseData(
       partner_id: null,
       project_code: "PRJ-2026-01",
       project_id: null,
-      notes: null,
+      title: null,
     },
     lines: [
       {
@@ -300,7 +300,7 @@ function baseData(
         incoming_invoice_id: null,
         cost_category_label: null,
         cost_category_id: null,
-        notes: null,
+        description: null,
       },
     ],
     validation: { valid: false, errors: [] },
@@ -739,7 +739,7 @@ describe("applyPatchToExtractedData", () => {
       incoming_invoice_id: null,
       cost_category_label: null,
       cost_category_id: null,
-      notes: null,
+      description: null,
     });
     const r = applyPatchToExtractedData(src, {
       kind: "delete_line",
@@ -770,7 +770,7 @@ describe("applyPatchToExtractedData", () => {
       incoming_invoice_id: null,
       cost_category_label: null,
       cost_category_id: null,
-      notes: null,
+      description: null,
     });
 
     const r = applyPatchToExtractedData(src, {
@@ -876,7 +876,7 @@ describe("editor field config completeness", () => {
       "contact_ruc",
       "partner_ruc",
       "project_code",
-      "notes",
+      "title",
     ];
     expect([...HEADER_EDITABLE_FIELDS].sort()).toEqual(expected.sort());
   });
@@ -887,7 +887,7 @@ describe("editor field config completeness", () => {
       "line_type",
       "invoice_number_hint",
       "cost_category_label",
-      "notes",
+      "description",
     ];
     expect([...LINE_EDITABLE_FIELDS].sort()).toEqual(expected.sort());
   });

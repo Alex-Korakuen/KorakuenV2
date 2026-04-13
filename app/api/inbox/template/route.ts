@@ -13,9 +13,14 @@ export async function GET() {
   const header = CSV_HEADER_COLUMNS.join(",");
   // Column order (must stay in sync with CSV_HEADER_COLUMNS):
   // group_id, payment_date, direction, bank_account, currency, exchange_rate,
-  // bank_reference, is_detraction, contact_ruc, partner_ruc, notes,
+  // bank_reference, is_detraction, contact_ruc, partner_ruc, title,
   // line_amount, line_type, project_code, invoice_number, cost_category,
-  // line_notes
+  // line_description
+  //
+  // The `title` column is the payment-level memo — typically the bank
+  // statement's own description of the transaction. The `line_description`
+  // column is only interesting on multi-line payments where each slice
+  // (invoice, bank fee, general expense) needs its own label.
   //
   // Optional fields:
   //   - contact_ruc: blank = unknown counterparty (informal vendor, cash

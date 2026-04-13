@@ -132,7 +132,7 @@ export function NewPaymentDialog({ children }: { children: ReactNode }) {
         currency,
         payment_date: paymentDate,
         bank_reference: bankReference.trim() || null,
-        notes: title.trim() || null,
+        title: title.trim() || null,
       },
       cleanLines.map((l, i) => {
         const amt = parseNum(l.amount);
@@ -142,7 +142,7 @@ export function NewPaymentDialog({ children }: { children: ReactNode }) {
           amount: amt,
           amount_pen: currency === "PEN" ? amt : amt,
           line_type: l.line_type,
-          notes: l.description.trim() || null,
+          description: l.description.trim() || null,
         };
       }),
     );

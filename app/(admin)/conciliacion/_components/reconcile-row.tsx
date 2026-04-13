@@ -101,7 +101,7 @@ export function ReconcileRow({
         </td>
         <td className="px-3 py-3 overflow-hidden">
           <p className="truncate text-sm text-foreground">
-            {payment.notes ?? "—"}
+            {payment.title ?? "—"}
           </p>
         </td>
         <td className="px-3 py-3 overflow-hidden">

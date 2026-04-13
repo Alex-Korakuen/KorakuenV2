@@ -79,7 +79,7 @@ export function PaymentRow({ payment, banksById, contactsById }: Props) {
         </td>
         <td className="px-3 py-3">
           <p className="text-sm truncate text-foreground">
-            {payment.notes ?? "—"}
+            {payment.title ?? "—"}
           </p>
         </td>
         <td className="px-3 py-3 font-mono text-xs text-muted-foreground">

@@ -45,13 +45,13 @@ export const CSV_HEADER_COLUMNS = [
   "is_detraction",
   "contact_ruc",
   "partner_ruc",
-  "notes",
+  "title",
   "line_amount",
   "line_type",
   "project_code",
   "invoice_number",
   "cost_category",
-  "line_notes",
+  "line_description",
 ] as const;
 
 export type CsvColumn = (typeof CSV_HEADER_COLUMNS)[number];
@@ -68,13 +68,13 @@ export type RawCsvRow = {
   is_detraction: string;
   contact_ruc: string;
   partner_ruc: string;
-  notes: string;
+  title: string;
   line_amount: string;
   line_type: string;
   project_code: string;
   invoice_number: string;
   cost_category: string;
-  line_notes: string;
+  line_description: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -132,13 +132,13 @@ export function parseCsvPaymentRows(
       is_detraction: (raw.is_detraction ?? "").toString(),
       contact_ruc: (raw.contact_ruc ?? "").toString(),
       partner_ruc: (raw.partner_ruc ?? "").toString(),
-      notes: (raw.notes ?? "").toString(),
+      title: (raw.title ?? "").toString(),
       line_amount: (raw.line_amount ?? "").toString(),
       line_type: (raw.line_type ?? "").toString(),
       project_code: (raw.project_code ?? "").toString(),
       invoice_number: (raw.invoice_number ?? "").toString(),
       cost_category: (raw.cost_category ?? "").toString(),
-      line_notes: (raw.line_notes ?? "").toString(),
+      line_description: (raw.line_description ?? "").toString(),
     };
     return row;
   });
@@ -219,7 +219,7 @@ export function buildSubmissionFromGroup(
     partner_id: null,
     project_code: first.project_code || null,
     project_id: null,
-    notes: first.notes || null,
+    title: first.title || null,
   };
 
   const structuralErrors: SubmissionFieldError[] = [];
@@ -243,7 +243,7 @@ export function buildSubmissionFromGroup(
     "is_detraction",
     "contact_ruc",
     "partner_ruc",
-    "notes",
+    "title",
   ] as const;
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
@@ -265,7 +265,7 @@ export function buildSubmissionFromGroup(
     incoming_invoice_id: null,
     cost_category_label: r.cost_category || null,
     cost_category_id: null,
-    notes: r.line_notes || null,
+    description: r.line_description || null,
   }));
 
   const extracted: PaymentSubmissionExtractedData = {
@@ -638,7 +638,7 @@ export const HEADER_EDITABLE_FIELDS = [
   "contact_ruc",
   "partner_ruc",
   "project_code",
-  "notes",
+  "title",
 ] as const;
 
 export type HeaderEditableField = (typeof HEADER_EDITABLE_FIELDS)[number];
@@ -648,7 +648,7 @@ export const LINE_EDITABLE_FIELDS = [
   "line_type",
   "invoice_number_hint",
   "cost_category_label",
-  "notes",
+  "description",
 ] as const;
 
 export type LineEditableField = (typeof LINE_EDITABLE_FIELDS)[number];
@@ -804,7 +804,7 @@ function coerceHeaderValue(
     case "contact_ruc":
     case "partner_ruc":
     case "project_code":
-    case "notes":
+    case "title":
       return success(value == null ? null : String(value).trim() || null);
     case "currency": {
       const raw = value == null ? null : String(value).toUpperCase().trim();
@@ -869,7 +869,7 @@ function coerceLineValue(
     }
     case "invoice_number_hint":
     case "cost_category_label":
-    case "notes":
+    case "description":
       return success(value == null ? null : String(value).trim() || null);
   }
 }
@@ -883,7 +883,7 @@ function blankLine(): PaymentSubmissionLine {
     incoming_invoice_id: null,
     cost_category_label: null,
     cost_category_id: null,
-    notes: null,
+    description: null,
   };
 }
 
@@ -964,6 +964,6 @@ function blankHeader(): PaymentSubmissionHeader {
     partner_id: null,
     project_code: null,
     project_id: null,
-    notes: null,
+    title: null,
   };
 }
