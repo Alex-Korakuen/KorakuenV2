@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import {
   AlertCircle,
   AlertTriangle,
@@ -10,6 +12,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatPEN, formatDate } from "@/lib/format";
+import { approveSubmission, rejectSubmission } from "@/app/actions/inbox";
 import type {
   SubmissionRow,
   PaymentSubmissionExtractedData,
@@ -51,6 +54,8 @@ function lineTypePillClasses(t: PaymentSubmissionLine["line_type"]): string {
 
 export function InboxTable({ submissions }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   function toggle(id: string) {
     setExpanded((prev) => {
@@ -58,6 +63,31 @@ export function InboxTable({ submissions }: Props) {
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
+    });
+  }
+
+  function handleApprove(id: string) {
+    startTransition(async () => {
+      const result = await approveSubmission(id);
+      if (result.success) {
+        toast.success("Pago creado");
+        router.refresh();
+      } else {
+        toast.error(result.error.message);
+        router.refresh();
+      }
+    });
+  }
+
+  function handleReject(id: string) {
+    startTransition(async () => {
+      const result = await rejectSubmission(id);
+      if (result.success) {
+        toast.success("Submission rechazada");
+        router.refresh();
+      } else {
+        toast.error(result.error.message);
+      }
     });
   }
 
@@ -140,6 +170,9 @@ export function InboxTable({ submissions }: Props) {
                 isOpen={isOpen}
                 hasError={hasError}
                 onToggle={() => toggle(s.id)}
+                onApprove={() => handleApprove(s.id)}
+                onReject={() => handleReject(s.id)}
+                pending={pending}
                 headerRaw={h}
               />
             );
@@ -157,6 +190,9 @@ function PaymentGroupRow({
   isOpen,
   hasError,
   onToggle,
+  onApprove,
+  onReject,
+  pending,
   headerRaw,
 }: {
   submission: SubmissionRow;
@@ -165,6 +201,9 @@ function PaymentGroupRow({
   isOpen: boolean;
   hasError: boolean;
   onToggle: () => void;
+  onApprove: () => void;
+  onReject: () => void;
+  pending: boolean;
   headerRaw: PaymentSubmissionExtractedData["header"];
 }) {
   const directionLabel =
@@ -251,10 +290,19 @@ function PaymentGroupRow({
             className="flex items-center justify-end gap-1.5"
             onClick={(e) => e.stopPropagation()}
           >
-            <Button size="sm" variant="outline" disabled>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={onReject}
+            >
               Rechazar
             </Button>
-            <Button size="sm" disabled>
+            <Button
+              size="sm"
+              disabled={pending || hasError}
+              onClick={onApprove}
+            >
               Aprobar
             </Button>
           </div>

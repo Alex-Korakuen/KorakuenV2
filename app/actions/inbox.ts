@@ -3,12 +3,19 @@
 import { randomUUID } from "node:crypto";
 import { requireAdmin } from "@/lib/auth";
 import { createServerClient } from "@/lib/db";
-import { normalizePagination, nowISO } from "@/lib/db-helpers";
+import {
+  fetchActiveById,
+  normalizePagination,
+  nowISO,
+} from "@/lib/db-helpers";
 import {
   success,
   failure,
   SUBMISSION_STATUS,
   SUBMISSION_SOURCE_TYPE,
+  SOURCE,
+  PAYMENT_DIRECTION,
+  PAYMENT_LINE_TYPE,
 } from "@/lib/types";
 import type {
   ValidationResult,
@@ -20,13 +27,20 @@ import type {
   ProjectRow,
   ContactRow,
   SubmissionFieldError,
+  CreatePaymentInput,
+  CreatePaymentLineInput,
 } from "@/lib/types";
+import type { PaymentWithLinesAndComputed } from "./payments";
 import {
   parseCsvPaymentRows,
   groupRowsByGroupId,
   buildSubmissionFromGroup,
+  validateApproveSubmission,
+  validateRejectSubmission,
+  validatePaymentSubmissionData,
 } from "@/lib/validators/inbox";
 import { findOrCreateContactByRuc } from "./contacts";
+import { createPayment } from "./payments";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -413,4 +427,412 @@ export async function getInboxBatches(): Promise<
   }
 
   return success(Array.from(byBatch.values()));
+}
+
+// ---------------------------------------------------------------------------
+// approveSubmission
+// ---------------------------------------------------------------------------
+
+/**
+ * Turn a staged submission into a real payment. Re-validates FK liveness,
+ * computes amount_pen per line, passes the payload to createPayment (which
+ * does the heavy lifting), and flips the submission to approved on success.
+ *
+ * On failure, writes the error back into the submission's
+ * `extracted_data.validation.errors` so the Inbox UI shows the blocker
+ * without requiring another click.
+ */
+export async function approveSubmission(
+  submissionId: string,
+): Promise<ValidationResult<PaymentWithLinesAndComputed>> {
+  const user = await requireAdmin();
+  const supabase = await createServerClient();
+
+  const submission = await fetchActiveById<SubmissionRow>(
+    supabase,
+    "submissions",
+    submissionId,
+  );
+  if (!submission) {
+    return failure("NOT_FOUND", "Submission no encontrada");
+  }
+
+  const gate = validateApproveSubmission(submission);
+  if (!gate.success) return gate as ValidationResult<PaymentWithLinesAndComputed>;
+
+  const extracted = gate.data;
+  const header = extracted.header;
+
+  // FK liveness re-check (R2: contact could have been soft-deleted between
+  // stage and approval).
+  const livenessErrors: SubmissionFieldError[] = [];
+  if (!header.bank_account_id) {
+    livenessErrors.push({
+      path: "header.bank_account",
+      message: "Cuenta bancaria no resuelta",
+    });
+  } else {
+    const bank = await fetchActiveById<BankAccountRow>(
+      supabase,
+      "bank_accounts",
+      header.bank_account_id,
+    );
+    if (!bank) {
+      livenessErrors.push({
+        path: "header.bank_account",
+        message: "Cuenta bancaria ya no existe o fue eliminada",
+      });
+    }
+  }
+  if (!header.contact_id) {
+    livenessErrors.push({
+      path: "header.contact_ruc",
+      message: "Contacto no resuelto",
+    });
+  } else {
+    const contact = await fetchActiveById<ContactRow>(
+      supabase,
+      "contacts",
+      header.contact_id,
+    );
+    if (!contact) {
+      livenessErrors.push({
+        path: "header.contact_ruc",
+        message: "El contacto ya no existe o fue eliminado",
+      });
+    }
+  }
+  if (header.project_id) {
+    const project = await fetchActiveById<ProjectRow>(
+      supabase,
+      "projects",
+      header.project_id,
+    );
+    if (!project) {
+      livenessErrors.push({
+        path: "header.project_code",
+        message: "El proyecto ya no existe o fue eliminado",
+      });
+    }
+  }
+
+  if (livenessErrors.length > 0) {
+    await persistValidationErrors(
+      supabase,
+      submissionId,
+      extracted,
+      livenessErrors,
+    );
+    return failure(
+      "VALIDATION_ERROR",
+      "Algunos datos referenciados ya no existen en el sistema",
+      Object.fromEntries(livenessErrors.map((e) => [e.path, e.message])),
+    );
+  }
+
+  // Build createPayment input
+  const build = buildCreatePaymentInputFromSubmission(extracted, submissionId);
+  if (!build.success) {
+    await persistValidationErrors(
+      supabase,
+      submissionId,
+      extracted,
+      build.error.fields
+        ? Object.entries(build.error.fields).map(([k, v]) => ({
+            path: k,
+            message: v,
+          }))
+        : [{ path: "build", message: build.error.message }],
+    );
+    return build as ValidationResult<PaymentWithLinesAndComputed>;
+  }
+
+  // Hand off to createPayment — it does currency/invoice/bank rules itself.
+  const paymentResult = await createPayment(build.data.data, build.data.lines);
+  if (!paymentResult.success) {
+    // Surface createPayment's per-field errors back into the submission so
+    // the row visibly flips to error state without a reload.
+    const errs: SubmissionFieldError[] = paymentResult.error.fields
+      ? Object.entries(paymentResult.error.fields).map(([k, v]) => ({
+          path: k,
+          message: v,
+        }))
+      : [{ path: "createPayment", message: paymentResult.error.message }];
+    await persistValidationErrors(supabase, submissionId, extracted, errs);
+    return paymentResult;
+  }
+
+  // Flip the submission to approved + link back to the created payment.
+  const now = nowISO();
+  const { error: updateError } = await supabase
+    .from("submissions")
+    .update({
+      review_status: SUBMISSION_STATUS.approved,
+      reviewed_by: user.id,
+      reviewed_at: now,
+      resulting_record_id: paymentResult.data.id,
+      resulting_record_type: "payments",
+      updated_at: now,
+    })
+    .eq("id", submissionId);
+
+  if (updateError) {
+    // The payment is already created but the submission link failed. Not
+    // ideal but not catastrophic — return the payment and log.
+    return failure(
+      "VALIDATION_ERROR",
+      `Pago creado pero no se pudo marcar la submission como aprobada: ${updateError.message}`,
+    );
+  }
+
+  return paymentResult;
+}
+
+// ---------------------------------------------------------------------------
+// rejectSubmission
+// ---------------------------------------------------------------------------
+
+export async function rejectSubmission(
+  submissionId: string,
+  notes?: string,
+): Promise<ValidationResult<SubmissionRow>> {
+  const user = await requireAdmin();
+  const supabase = await createServerClient();
+
+  const submission = await fetchActiveById<SubmissionRow>(
+    supabase,
+    "submissions",
+    submissionId,
+  );
+  if (!submission) {
+    return failure("NOT_FOUND", "Submission no encontrada");
+  }
+
+  const gate = validateRejectSubmission(submission);
+  if (!gate.success) return gate as ValidationResult<SubmissionRow>;
+
+  const now = nowISO();
+  const { data: updated, error } = await supabase
+    .from("submissions")
+    .update({
+      review_status: SUBMISSION_STATUS.rejected,
+      reviewed_by: user.id,
+      reviewed_at: now,
+      rejection_notes: notes?.trim() || null,
+      updated_at: now,
+    })
+    .eq("id", submissionId)
+    .select()
+    .single();
+
+  if (error || !updated) {
+    return failure(
+      "VALIDATION_ERROR",
+      error?.message ?? "No se pudo rechazar la submission",
+    );
+  }
+
+  return success(updated as SubmissionRow);
+}
+
+// ---------------------------------------------------------------------------
+// approveBatchValid
+// ---------------------------------------------------------------------------
+
+type BatchApprovalReport = {
+  approved: string[];
+  failed: Array<{ id: string; error: string }>;
+  skipped: string[];
+};
+
+/**
+ * Loop through every pending-and-valid submission in a batch, approving
+ * each one sequentially. Best-effort: failures do not stop the loop, and
+ * per-row errors are persisted back into each submission's extracted_data
+ * so the UI reflects what went wrong.
+ */
+export async function approveBatchValid(
+  batchId: string,
+): Promise<ValidationResult<BatchApprovalReport>> {
+  await requireAdmin();
+  const supabase = await createServerClient();
+
+  const { data, error } = await supabase
+    .from("submissions")
+    .select("id, extracted_data, review_status, deleted_at")
+    .eq("import_batch_id", batchId)
+    .eq("source_type", SUBMISSION_SOURCE_TYPE.payment)
+    .eq("review_status", SUBMISSION_STATUS.pending)
+    .is("deleted_at", null);
+
+  if (error) {
+    return failure(
+      "NOT_FOUND",
+      `No se pudieron cargar las submissions del lote: ${error.message}`,
+    );
+  }
+
+  const report: BatchApprovalReport = {
+    approved: [],
+    failed: [],
+    skipped: [],
+  };
+
+  for (const row of data ?? []) {
+    const extracted = row.extracted_data as
+      | PaymentSubmissionExtractedData
+      | null;
+    if (!extracted || !extracted.validation?.valid) {
+      report.skipped.push(row.id as string);
+      continue;
+    }
+    const result = await approveSubmission(row.id as string);
+    if (result.success) {
+      report.approved.push(row.id as string);
+    } else {
+      report.failed.push({
+        id: row.id as string,
+        error: result.error.message,
+      });
+    }
+  }
+
+  return success(report);
+}
+
+// ---------------------------------------------------------------------------
+// buildCreatePaymentInputFromSubmission (internal)
+// ---------------------------------------------------------------------------
+
+function buildCreatePaymentInputFromSubmission(
+  extracted: PaymentSubmissionExtractedData,
+  submissionId: string,
+): ValidationResult<{
+  data: CreatePaymentInput;
+  lines: CreatePaymentLineInput[];
+}> {
+  const h = extracted.header;
+
+  // These should have been caught by validateApproveSubmission already,
+  // but the type system wants explicit narrowing.
+  if (
+    !h.payment_date ||
+    !h.direction ||
+    !h.bank_account_id ||
+    !h.currency ||
+    !h.contact_id
+  ) {
+    return failure("VALIDATION_ERROR", "Submission incompleta", {
+      build: "Missing required header fields after validation",
+    });
+  }
+
+  const directionCode =
+    h.direction === "inbound"
+      ? PAYMENT_DIRECTION.inbound
+      : PAYMENT_DIRECTION.outbound;
+
+  const data: CreatePaymentInput = {
+    direction: directionCode,
+    bank_account_id: h.bank_account_id,
+    project_id: h.project_id,
+    contact_id: h.contact_id,
+    currency: h.currency,
+    exchange_rate: h.exchange_rate,
+    payment_date: h.payment_date,
+    bank_reference: h.bank_reference,
+    notes: h.notes,
+    source: SOURCE.csv_import,
+    submission_id: submissionId,
+  };
+
+  // Compute amount_pen per line. For PEN, it's equal to amount. For USD,
+  // multiply by exchange_rate. If exchange_rate is null for USD, createPayment
+  // will look it up from the exchange_rates table — but amount_pen is still
+  // required on insert, so we need a fallback. We refuse the build if USD
+  // without rate is hit here; the user needs to fill in the rate first.
+  let ratePerPen = 1;
+  if (h.currency === "USD") {
+    if (h.exchange_rate == null || h.exchange_rate <= 0) {
+      return failure(
+        "VALIDATION_ERROR",
+        "Tipo de cambio requerido para pagos en USD",
+        { "header.exchange_rate": "Required for USD" },
+      );
+    }
+    ratePerPen = h.exchange_rate;
+  }
+
+  const lines: CreatePaymentLineInput[] = extracted.lines.map((l, idx) => {
+    const amount = l.amount ?? 0;
+    return {
+      sort_order: idx,
+      amount,
+      amount_pen: amount * ratePerPen,
+      outgoing_invoice_id:
+        directionCode === PAYMENT_DIRECTION.inbound
+          ? l.outgoing_invoice_id ?? null
+          : null,
+      incoming_invoice_id:
+        directionCode === PAYMENT_DIRECTION.outbound
+          ? l.incoming_invoice_id ?? null
+          : null,
+      cost_category_id: l.cost_category_id ?? null,
+      line_type: paymentLineTypeToCode(l.line_type),
+      notes: l.notes,
+    };
+  });
+
+  return success({ data, lines });
+}
+
+function paymentLineTypeToCode(
+  t: PaymentSubmissionLine["line_type"],
+): number {
+  switch (t) {
+    case "invoice":
+      return PAYMENT_LINE_TYPE.invoice;
+    case "bank_fee":
+      return PAYMENT_LINE_TYPE.bank_fee;
+    case "detraction":
+      return PAYMENT_LINE_TYPE.detraction;
+    case "loan":
+      return PAYMENT_LINE_TYPE.loan;
+    case "general":
+    default:
+      return PAYMENT_LINE_TYPE.general;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// persistValidationErrors (internal)
+// ---------------------------------------------------------------------------
+
+/**
+ * Merge new error entries into a submission's extracted_data.validation.
+ * Used when approval surfaces problems that weren't visible at stage time
+ * (FK soft-delete, createPayment refusal, etc.). Leaves existing errors
+ * in place and adds the new ones, keeping the array deduped by path+message.
+ */
+async function persistValidationErrors(
+  supabase: Awaited<ReturnType<typeof createServerClient>>,
+  submissionId: string,
+  extracted: PaymentSubmissionExtractedData,
+  newErrors: SubmissionFieldError[],
+): Promise<void> {
+  if (newErrors.length === 0) return;
+  const existing = extracted.validation.errors ?? [];
+  const dedup = new Map<string, SubmissionFieldError>();
+  for (const e of [...existing, ...newErrors]) {
+    dedup.set(`${e.path}::${e.message}`, e);
+  }
+  const merged = Array.from(dedup.values());
+  const nextData: PaymentSubmissionExtractedData = {
+    ...extracted,
+    validation: { valid: false, errors: merged },
+  };
+  await supabase
+    .from("submissions")
+    .update({ extracted_data: nextData, updated_at: nowISO() })
+    .eq("id", submissionId);
 }

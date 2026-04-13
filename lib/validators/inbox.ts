@@ -1,5 +1,10 @@
 import Papa from "papaparse";
-import { success, failure } from "@/lib/types";
+import {
+  success,
+  failure,
+  SUBMISSION_STATUS,
+  SUBMISSION_SOURCE_TYPE,
+} from "@/lib/types";
 import type {
   ValidationResult,
   PaymentSubmissionHeader,
@@ -7,6 +12,7 @@ import type {
   PaymentSubmissionExtractedData,
   SubmissionFieldError,
   SubmissionValidationReport,
+  SubmissionRow,
 } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -469,6 +475,67 @@ export function parseBoolean(raw: string): boolean {
   const v = raw.trim().toLowerCase();
   return v === "true" || v === "1" || v === "yes" || v === "si" || v === "sí";
 }
+
+// ---------------------------------------------------------------------------
+// Approval/rejection guards
+// ---------------------------------------------------------------------------
+
+/**
+ * Gate on approving a submission: must be pending, source_type=payment,
+ * not soft-deleted, extracted_data must be a payment payload, and its
+ * stored validation must currently pass. Returns the payload on success
+ * so the caller can immediately build a CreatePaymentInput from it.
+ */
+export function validateApproveSubmission(
+  submission: SubmissionRow,
+): ValidationResult<PaymentSubmissionExtractedData> {
+  if (submission.deleted_at) {
+    return failure("NOT_FOUND", "Submission no encontrada");
+  }
+  if (submission.source_type !== SUBMISSION_SOURCE_TYPE.payment) {
+    return failure(
+      "VALIDATION_ERROR",
+      "Solo submissions de tipo pago pueden aprobarse por esta acción",
+    );
+  }
+  if (submission.review_status !== SUBMISSION_STATUS.pending) {
+    return failure("CONFLICT", "La submission ya fue aprobada o rechazada");
+  }
+
+  const data = submission.extracted_data as PaymentSubmissionExtractedData;
+  if (!data || data.kind !== "payment") {
+    return failure(
+      "VALIDATION_ERROR",
+      "La submission no contiene datos de pago válidos",
+    );
+  }
+  if (!data.validation?.valid) {
+    return failure(
+      "VALIDATION_ERROR",
+      "La submission tiene errores pendientes — corrígelos antes de aprobar",
+    );
+  }
+
+  return success(data);
+}
+
+/**
+ * Gate on rejecting a submission: must be pending and not soft-deleted.
+ * source_type is not enforced — rejection is universal across staging types.
+ */
+export function validateRejectSubmission(
+  submission: SubmissionRow,
+): ValidationResult<void> {
+  if (submission.deleted_at) {
+    return failure("NOT_FOUND", "Submission no encontrada");
+  }
+  if (submission.review_status !== SUBMISSION_STATUS.pending) {
+    return failure("CONFLICT", "La submission ya fue aprobada o rechazada");
+  }
+  return success(undefined);
+}
+
+// ---------------------------------------------------------------------------
 
 function blankHeader(): PaymentSubmissionHeader {
   return {

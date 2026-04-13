@@ -4,6 +4,8 @@ import {
   groupRowsByGroupId,
   buildSubmissionFromGroup,
   validatePaymentSubmissionData,
+  validateApproveSubmission,
+  validateRejectSubmission,
   normalizeDirection,
   normalizeCurrency,
   normalizeLineType,
@@ -12,7 +14,14 @@ import {
   parseBoolean,
   CSV_HEADER_COLUMNS,
 } from "../inbox";
-import type { PaymentSubmissionExtractedData } from "../../types";
+import {
+  SUBMISSION_STATUS,
+  SUBMISSION_SOURCE_TYPE,
+} from "../../types";
+import type {
+  PaymentSubmissionExtractedData,
+  SubmissionRow,
+} from "../../types";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -385,6 +394,129 @@ describe("validatePaymentSubmissionData", () => {
     d.lines[0].invoice_number_hint = "F001-00001";
     const r = validatePaymentSubmissionData(d);
     expect(r.valid).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateApproveSubmission / validateRejectSubmission
+// ---------------------------------------------------------------------------
+
+function makeSubmission(
+  overrides: Partial<SubmissionRow> = {},
+): SubmissionRow {
+  return {
+    id: "sub-1",
+    source_type: SUBMISSION_SOURCE_TYPE.payment,
+    submitted_by: "user-1",
+    submitted_at: "2026-04-13T10:00:00Z",
+    image_url: null,
+    pdf_url: null,
+    xml_url: null,
+    extracted_data: {
+      ...baseData(),
+      validation: { valid: true, errors: [] },
+    },
+    review_status: SUBMISSION_STATUS.pending,
+    reviewed_by: null,
+    reviewed_at: null,
+    rejection_notes: null,
+    resulting_record_id: null,
+    resulting_record_type: null,
+    import_batch_id: "batch-1",
+    import_batch_label: "demo.csv",
+    created_at: "2026-04-13T10:00:00Z",
+    updated_at: "2026-04-13T10:00:00Z",
+    deleted_at: null,
+    ...overrides,
+  };
+}
+
+describe("validateApproveSubmission", () => {
+  it("accepts a valid, pending, payment submission", () => {
+    const r = validateApproveSubmission(makeSubmission());
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects a soft-deleted submission", () => {
+    const r = validateApproveSubmission(
+      makeSubmission({ deleted_at: "2026-04-13T11:00:00Z" }),
+    );
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    expect(r.error.code).toBe("NOT_FOUND");
+  });
+
+  it("rejects an already-approved submission", () => {
+    const r = validateApproveSubmission(
+      makeSubmission({ review_status: SUBMISSION_STATUS.approved }),
+    );
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    expect(r.error.code).toBe("CONFLICT");
+  });
+
+  it("rejects a submission whose extracted_data still has errors", () => {
+    const extracted = {
+      ...baseData(),
+      validation: {
+        valid: false,
+        errors: [{ path: "header.currency", message: "Required" }],
+      },
+    };
+    const r = validateApproveSubmission(
+      makeSubmission({ extracted_data: extracted }),
+    );
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    expect(r.error.message).toMatch(/errores pendientes/);
+  });
+
+  it("rejects a non-payment source_type", () => {
+    const r = validateApproveSubmission(
+      makeSubmission({
+        source_type: SUBMISSION_SOURCE_TYPE.incoming_invoice,
+      }),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects a payload that isn't kind='payment'", () => {
+    const r = validateApproveSubmission(
+      makeSubmission({ extracted_data: { kind: "whatever" } as never }),
+    );
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("validateRejectSubmission", () => {
+  it("accepts a pending submission", () => {
+    const r = validateRejectSubmission(makeSubmission());
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects a soft-deleted submission", () => {
+    const r = validateRejectSubmission(
+      makeSubmission({ deleted_at: "2026-04-13T11:00:00Z" }),
+    );
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    expect(r.error.code).toBe("NOT_FOUND");
+  });
+
+  it("rejects an already-approved submission", () => {
+    const r = validateRejectSubmission(
+      makeSubmission({ review_status: SUBMISSION_STATUS.approved }),
+    );
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    expect(r.error.code).toBe("CONFLICT");
+  });
+
+  it("rejects an already-rejected submission", () => {
+    const r = validateRejectSubmission(
+      makeSubmission({ review_status: SUBMISSION_STATUS.rejected }),
+    );
+    expect(r.success).toBe(false);
   });
 });
 

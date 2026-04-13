@@ -787,6 +787,8 @@ export type CreatePaymentInput = {
   payment_date: string;
   bank_reference?: string | null;
   notes?: string | null;
+  source?: number;
+  submission_id?: string | null;
 };
 
 export type CreatePaymentLineInput = {

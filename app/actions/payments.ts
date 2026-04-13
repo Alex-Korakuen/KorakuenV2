@@ -632,7 +632,8 @@ export async function createPayment(
     bank_reference: data.bank_reference ?? null,
     payment_date: data.payment_date,
     notes: data.notes ?? null,
-    source: 1, // manual
+    source: data.source ?? 1,
+    submission_id: data.submission_id ?? null,
   };
 
   const { data: inserted, error: insertError } = await supabase

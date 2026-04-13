@@ -1,6 +1,12 @@
+"use client";
+
+import { useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { CheckCheck, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/format";
+import { approveBatchValid } from "@/app/actions/inbox";
 
 type BatchSummary = {
   import_batch_id: string;
@@ -19,6 +25,30 @@ type Props = {
 };
 
 export function InboxBatchBanner({ batch }: Props) {
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+
+  function handleApproveAll() {
+    startTransition(async () => {
+      const result = await approveBatchValid(batch.import_batch_id);
+      if (!result.success) {
+        toast.error(result.error.message);
+        return;
+      }
+      const { approved, failed, skipped } = result.data;
+      if (failed.length === 0 && skipped.length === 0) {
+        toast.success(`${approved.length} pagos aprobados`);
+      } else {
+        toast.success(
+          `${approved.length} aprobadas, ${failed.length} fallaron, ${skipped.length} con errores`,
+        );
+      }
+      router.refresh();
+    });
+  }
+
+  const approveDisabled = pending || batch.valid === 0;
+
   return (
     <div className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3">
       <div className="flex items-center gap-3">
@@ -40,10 +70,12 @@ export function InboxBatchBanner({ batch }: Props) {
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <Button size="sm" variant="outline" disabled>
-          Descartar lote
-        </Button>
-        <Button size="sm" className="gap-1.5" disabled>
+        <Button
+          size="sm"
+          className="gap-1.5"
+          disabled={approveDisabled}
+          onClick={handleApproveAll}
+        >
           <CheckCheck className="h-3.5 w-3.5" />
           Aprobar {batch.valid} válidas
         </Button>
