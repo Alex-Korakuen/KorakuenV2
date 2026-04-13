@@ -6,6 +6,7 @@ import {
   FileUp,
   FolderKanban,
   Home,
+  Inbox,
   Settings,
   Users,
   Wallet,
@@ -35,6 +36,7 @@ export const ADMIN_NAV: NavGroup[] = [
       { href: "/facturas-recibidas", label: "Recibidas", icon: FileDown },
       { href: "/pagos", label: "Pagos", icon: Wallet },
       { href: "/conciliacion", label: "Conciliación", icon: CheckSquare },
+      { href: "/inbox", label: "Inbox", icon: Inbox },
     ],
   },
   {
