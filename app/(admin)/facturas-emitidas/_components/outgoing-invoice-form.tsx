@@ -33,6 +33,11 @@ type Props = {
   invoice?: OutgoingInvoiceRow;
   existingLineItems?: OutgoingInvoiceLineItemRow[];
   initialProject?: ProjectRow;
+  // Called after a successful save. Used by the dialog variant to close itself.
+  onAfterSave?: () => void;
+  // Controls the outer layout. "page" adds max-w + padding for full-page edit.
+  // "dialog" renders content flush for use inside a Dialog body.
+  variant?: "page" | "dialog";
 };
 
 const IGV_RATE = 0.18;
@@ -57,6 +62,8 @@ export function OutgoingInvoiceForm({
   invoice,
   existingLineItems,
   initialProject,
+  onAfterSave,
+  variant = "page",
 }: Props) {
   const router = useRouter();
   const isEdit = !!invoice;
@@ -241,7 +248,12 @@ export function OutgoingInvoiceForm({
 
       setSaving(false);
       toast.success(markSent ? "Factura emitida" : "Borrador guardado");
-      router.push(`/facturas-emitidas/${result.data.id}`);
+      if (onAfterSave) {
+        onAfterSave();
+        router.refresh();
+      } else {
+        router.push(`/facturas-emitidas/${result.data.id}`);
+      }
       return;
     }
 
@@ -278,10 +290,12 @@ export function OutgoingInvoiceForm({
   }
 
   const canSendFromDraft = !isEdit || invoice?.status === 1;
+  const wrapperClass =
+    variant === "page" ? "max-w-4xl px-8 py-8" : "";
 
   return (
-    <div className="max-w-4xl px-8 py-8">
-      <div className="mb-8 flex items-start justify-between gap-4">
+    <div className={wrapperClass}>
+      <div className="mb-6 flex items-start justify-between gap-4">
         <h2 className="text-xl font-semibold text-foreground">
           {isEdit ? "Editar factura emitida" : "Nueva factura emitida"}
         </h2>

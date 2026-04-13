@@ -1,15 +1,15 @@
 import Link from "next/link";
 import { Plus, Search } from "lucide-react";
-import { getOutgoingInvoices } from "@/app/actions/outgoing-invoices";
+import { getIncomingInvoices } from "@/app/actions/incoming-invoices";
 import { getProjects } from "@/app/actions/projects";
 import { getContacts } from "@/app/actions/contacts";
 import { TopBar } from "@/components/app-shell/top-bar";
 import { ExchangeRateChip } from "@/components/app-shell/exchange-rate-chip";
 import { Button } from "@/components/ui/button";
 import { formatPEN, formatDate } from "@/lib/format";
-import { OUTGOING_INVOICE_STATUS } from "@/lib/types";
+import { INCOMING_INVOICE_FACTURA_STATUS } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { OutgoingInvoiceDialog } from "./_components/outgoing-invoice-dialog";
+import { IncomingInvoiceDialog } from "./_components/incoming-invoice-dialog";
 
 type Props = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -19,7 +19,6 @@ function pickFirst(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
 }
 
-// Derive a short label from a razón social. Matches the partner dialog logic.
 function deriveShortLabel(razonSocial: string): string {
   const cleaned = razonSocial
     .replace(/\b(S\.?A\.?C?\.?|E\.?I\.?R\.?L\.?|S\.?R\.?L\.?)\b/gi, "")
@@ -32,36 +31,43 @@ function deriveShortLabel(razonSocial: string): string {
 }
 
 const STATUS_LABELS: Record<number, string> = {
-  [OUTGOING_INVOICE_STATUS.draft]: "Borrador",
-  [OUTGOING_INVOICE_STATUS.sent]: "Emitida",
-  [OUTGOING_INVOICE_STATUS.void]: "Anulada",
+  [INCOMING_INVOICE_FACTURA_STATUS.expected]: "Esperada",
+  [INCOMING_INVOICE_FACTURA_STATUS.received]: "Recibida",
 };
 
 const STATUS_BADGE: Record<number, string> = {
-  [OUTGOING_INVOICE_STATUS.draft]: "bg-stone-100 text-stone-600",
-  [OUTGOING_INVOICE_STATUS.sent]: "bg-emerald-50 text-emerald-700",
-  [OUTGOING_INVOICE_STATUS.void]: "bg-stone-50 text-stone-500",
+  [INCOMING_INVOICE_FACTURA_STATUS.expected]: "bg-amber-50 text-amber-700",
+  [INCOMING_INVOICE_FACTURA_STATUS.received]: "bg-emerald-50 text-emerald-700",
 };
 
-export default async function FacturasEmitidasPage({ searchParams }: Props) {
+export default async function FacturasRecibidasPage({ searchParams }: Props) {
   const params = await searchParams;
   const search = pickFirst(params.search).trim();
   const filterKey = pickFirst(params.filter).trim() || "todas";
 
   const filters: Record<string, unknown> = {};
-  if (filterKey === "borradores") filters.status = OUTGOING_INVOICE_STATUS.draft;
-  if (filterKey === "emitidas") filters.status = OUTGOING_INVOICE_STATUS.sent;
-  if (filterKey === "anuladas") filters.status = OUTGOING_INVOICE_STATUS.void;
+  if (filterKey === "esperadas")
+    filters.factura_status = INCOMING_INVOICE_FACTURA_STATUS.expected;
+  if (filterKey === "recibidas")
+    filters.factura_status = INCOMING_INVOICE_FACTURA_STATUS.received;
 
-  const result = await getOutgoingInvoices(filters);
+  const result = await getIncomingInvoices(filters);
   const invoices = result.success ? result.data.data : [];
 
-  // Gather project IDs and contact IDs for label lookups
-  const projectIds = [...new Set(invoices.map((i) => i.project_id))];
+  const projectIds = [
+    ...new Set(
+      invoices
+        .map((i) => i.project_id)
+        .filter((id): id is string => id !== null),
+    ),
+  ];
   const [projectsResult, contactsResult] = await Promise.all([
     projectIds.length > 0
       ? getProjects({ limit: 200 })
-      : Promise.resolve({ success: true as const, data: { data: [] } }),
+      : Promise.resolve({
+          success: true as const,
+          data: { data: [], total: 0, limit: 0, offset: 0 },
+        }),
     getContacts({ limit: 200 }),
   ]);
 
@@ -83,13 +89,9 @@ export default async function FacturasEmitidasPage({ searchParams }: Props) {
       .map((c) => [c.ruc as string, c]),
   );
 
-  // Compute summary: facturado = sum of total_pen for non-void invoices
-  //                 pendiente = sum of outstanding (_computed) for non-void
-  const nonVoid = invoices.filter(
-    (i) => i.status !== OUTGOING_INVOICE_STATUS.void,
-  );
-  const facturado = nonVoid.reduce((s, i) => s + Number(i.total_pen), 0);
-  const pendiente = nonVoid.reduce(
+  // Summary: costo (total_pen) + pendiente (outstanding)
+  const costo = invoices.reduce((s, i) => s + Number(i.total_pen), 0);
+  const pendiente = invoices.reduce(
     (s, i) => s + Number(i._computed.outstanding),
     0,
   );
@@ -99,33 +101,32 @@ export default async function FacturasEmitidasPage({ searchParams }: Props) {
       <TopBar
         left={
           <span className="text-sm font-medium text-muted-foreground">
-            Facturas emitidas
+            Facturas recibidas
           </span>
         }
         right={
           <div className="flex items-center gap-4">
-            <OutgoingInvoiceDialog>
+            <IncomingInvoiceDialog>
               <Button size="sm" className="gap-1.5">
                 <Plus className="h-3.5 w-3.5" />
                 Nueva factura
               </Button>
-            </OutgoingInvoiceDialog>
+            </IncomingInvoiceDialog>
             <ExchangeRateChip />
           </div>
         }
       />
 
       <div className="max-w-6xl px-8 py-8">
-        {/* Search + filters + totals on one line */}
         <div className="mb-6 flex items-center gap-6">
-          <form className="relative flex-1" action="/facturas-emitidas" method="get">
+          <form className="relative flex-1" action="/facturas-recibidas" method="get">
             <input type="hidden" name="filter" value={filterKey} />
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground/40" />
             <input
               name="search"
               type="text"
               defaultValue={search}
-              placeholder="Buscar por serie/número, cliente o proyecto…"
+              placeholder="Buscar por serie/número, proveedor o proyecto…"
               className="w-full rounded-lg border border-input bg-card py-2.5 pl-10 pr-4 text-sm text-foreground placeholder-muted-foreground focus:border-primary/50 focus:outline-none"
             />
           </form>
@@ -133,14 +134,13 @@ export default async function FacturasEmitidasPage({ searchParams }: Props) {
             {(
               [
                 ["todas", "Todas"],
-                ["borradores", "Borradores"],
-                ["emitidas", "Emitidas"],
-                ["anuladas", "Anuladas"],
+                ["esperadas", "Esperadas"],
+                ["recibidas", "Recibidas"],
               ] as const
             ).map(([key, label]) => (
               <Link
                 key={key}
-                href={`/facturas-emitidas?filter=${key}${search ? `&search=${encodeURIComponent(search)}` : ""}`}
+                href={`/facturas-recibidas?filter=${key}${search ? `&search=${encodeURIComponent(search)}` : ""}`}
                 className={
                   filterKey === key
                     ? "font-medium text-primary"
@@ -156,13 +156,13 @@ export default async function FacturasEmitidasPage({ searchParams }: Props) {
             style={{ borderLeft: "1px solid var(--border)" }}
           >
             <div className="text-right">
-              <p className="text-[10px] text-muted-foreground">Facturado</p>
+              <p className="text-[10px] text-muted-foreground">Costo</p>
               <p className="text-sm font-medium tabular-nums text-foreground">
-                {formatPEN(facturado)}
+                {formatPEN(costo)}
               </p>
             </div>
             <div className="text-right">
-              <p className="text-[10px] text-muted-foreground">Pendiente</p>
+              <p className="text-[10px] text-muted-foreground">Por pagar</p>
               <p
                 className="text-sm font-medium tabular-nums"
                 style={{ color: pendiente > 0 ? "#b45309" : "#78716c" }}
@@ -176,7 +176,7 @@ export default async function FacturasEmitidasPage({ searchParams }: Props) {
         {invoices.length === 0 ? (
           <div className="py-16 text-center">
             <p className="text-sm text-muted-foreground">
-              {search ? "No se encontraron facturas." : "Aún no hay facturas emitidas."}
+              {search ? "No se encontraron facturas." : "Aún no hay facturas recibidas."}
             </p>
           </div>
         ) : (
@@ -197,7 +197,7 @@ export default async function FacturasEmitidasPage({ searchParams }: Props) {
                     Socio
                   </th>
                   <th className="text-left px-3 py-2.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                    Cliente
+                    Proveedor
                   </th>
                   <th className="text-left px-3 py-2.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                     N°
@@ -215,12 +215,12 @@ export default async function FacturasEmitidasPage({ searchParams }: Props) {
               </thead>
               <tbody>
                 {invoices.map((invoice) => {
-                  const project = projectsById.get(invoice.project_id);
-                  const client = project
-                    ? contactsById.get(project.client_id)
+                  const project = invoice.project_id
+                    ? projectsById.get(invoice.project_id)
                     : undefined;
-                  const socioContact = invoice.ruc_emisor
-                    ? contactsByRuc.get(invoice.ruc_emisor)
+                  const vendor = contactsById.get(invoice.contact_id);
+                  const socioContact = invoice.ruc_receptor
+                    ? contactsByRuc.get(invoice.ruc_receptor)
                     : undefined;
                   const socioLabel = socioContact
                     ? deriveShortLabel(socioContact.razon_social)
@@ -233,19 +233,22 @@ export default async function FacturasEmitidasPage({ searchParams }: Props) {
                     >
                       <td className="px-3 py-3">
                         <Link
-                          href={`/facturas-emitidas/${invoice.id}`}
+                          href={`/facturas-recibidas/${invoice.id}`}
                           className="block text-xs text-muted-foreground"
                         >
-                          {formatDate(invoice.issue_date)}
+                          {invoice.fecha_emision
+                            ? formatDate(invoice.fecha_emision)
+                            : "—"}
                         </Link>
                       </td>
                       <td className="px-3 py-3">
-                        <Link
-                          href={`/facturas-emitidas/${invoice.id}`}
-                          className="block"
-                        >
+                        <Link href={`/facturas-recibidas/${invoice.id}`} className="block">
                           <p className="text-sm truncate text-foreground">
-                            {project?.name ?? "—"}
+                            {project?.name ?? (
+                              <span className="text-muted-foreground">
+                                Gastos generales
+                              </span>
+                            )}
                           </p>
                           <p className="text-[11px] font-mono text-muted-foreground">
                             {project?.code ?? "—"}
@@ -262,7 +265,7 @@ export default async function FacturasEmitidasPage({ searchParams }: Props) {
                       </td>
                       <td className="px-3 py-3">
                         <p className="text-sm truncate text-foreground">
-                          {client?.razon_social ?? "—"}
+                          {vendor?.razon_social ?? "—"}
                         </p>
                       </td>
                       <td className="px-3 py-3 font-mono text-xs text-foreground">
@@ -288,10 +291,10 @@ export default async function FacturasEmitidasPage({ searchParams }: Props) {
                         <span
                           className={cn(
                             "inline-flex h-5 items-center rounded-full px-2 text-[11px] font-medium",
-                            STATUS_BADGE[invoice.status],
+                            STATUS_BADGE[invoice.factura_status],
                           )}
                         >
-                          {STATUS_LABELS[invoice.status]}
+                          {STATUS_LABELS[invoice.factura_status]}
                         </span>
                       </td>
                     </tr>
