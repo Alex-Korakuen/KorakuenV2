@@ -106,6 +106,13 @@ export const DETRACTION_HANDLED_BY_INCOMING = {
 export const SOURCE = {
   manual: 1,
   scan_app: 2,
+  csv_import: 3,
+} as const;
+
+export const SUBMISSION_SOURCE_TYPE = {
+  incoming_invoice: 1,
+  outgoing_invoice: 2,
+  payment: 3,
 } as const;
 
 export const USER_ROLE = {
@@ -836,4 +843,87 @@ export type CreateProjectBudgetInput = {
 export type UpdateProjectBudgetInput = {
   budgeted_amount_pen?: number;
   notes?: string | null;
+};
+
+// ---------------------------------------------------------------------------
+// Submissions (staging layer for scan-app AND CSV Inbox import)
+// ---------------------------------------------------------------------------
+
+/**
+ * Header portion of a staged payment submission. Fields mirror the CSV
+ * template columns and the payments table. FK labels (bank_account,
+ * project_code, contact_ruc) resolve to UUIDs at stage time; the UUIDs
+ * are stored alongside the raw labels so the UI can show both.
+ */
+export type PaymentSubmissionHeader = {
+  payment_date: string | null;
+  direction: "inbound" | "outbound" | null;
+  bank_account_label: string | null;
+  bank_account_id: string | null;
+  currency: "PEN" | "USD" | null;
+  exchange_rate: number | null;
+  bank_reference: string | null;
+  is_detraction: boolean;
+  contact_ruc: string | null;
+  contact_id: string | null;
+  project_code: string | null;
+  project_id: string | null;
+  notes: string | null;
+};
+
+export type PaymentSubmissionLine = {
+  amount: number | null;
+  line_type:
+    | "invoice"
+    | "bank_fee"
+    | "detraction"
+    | "loan"
+    | "general"
+    | null;
+  invoice_number_hint: string | null;
+  outgoing_invoice_id: string | null;
+  incoming_invoice_id: string | null;
+  cost_category_label: string | null;
+  cost_category_id: string | null;
+  notes: string | null;
+};
+
+export type SubmissionFieldError = {
+  path: string;
+  message: string;
+};
+
+export type SubmissionValidationReport = {
+  valid: boolean;
+  errors: SubmissionFieldError[];
+};
+
+export type PaymentSubmissionExtractedData = {
+  kind: "payment";
+  header: PaymentSubmissionHeader;
+  lines: PaymentSubmissionLine[];
+  validation: SubmissionValidationReport;
+  csv_row_numbers?: number[];
+};
+
+export type SubmissionRow = {
+  id: string;
+  source_type: number;
+  submitted_by: string;
+  submitted_at: string;
+  image_url: string | null;
+  pdf_url: string | null;
+  xml_url: string | null;
+  extracted_data: PaymentSubmissionExtractedData | Record<string, unknown>;
+  review_status: number;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  rejection_notes: string | null;
+  resulting_record_id: string | null;
+  resulting_record_type: string | null;
+  import_batch_id: string | null;
+  import_batch_label: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
 };

@@ -281,6 +281,88 @@ export async function createContact(
 }
 
 // ---------------------------------------------------------------------------
+// findOrCreateContactByRuc (Inbox auto-create path)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a RUC to an existing contact id, or auto-create one via SUNAT if
+ * it isn't in the local table yet. Used by the Inbox CSV import when a row
+ * references a RUC that hasn't been added manually.
+ *
+ * Auto-created contacts are flagged with `created_via_inbox=true` so they
+ * can be reviewed later. Initial `is_client`/`is_vendor` is derived from
+ * the payment direction the CSV row belongs to.
+ */
+export async function findOrCreateContactByRuc(
+  ruc: string,
+  direction: "inbound" | "outbound",
+): Promise<ValidationResult<ContactRow>> {
+  await requireAdmin();
+
+  const rucValidation = validateRuc(ruc);
+  if (!rucValidation.success) return rucValidation;
+
+  const supabase = await createServerClient();
+
+  // Happy path: contact already exists.
+  const { data: existing } = await supabase
+    .from("contacts")
+    .select("*")
+    .eq("ruc", rucValidation.data)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (existing) {
+    return success(existing as ContactRow);
+  }
+
+  // Unknown RUC → SUNAT lookup + insert.
+  let lookup: LookupResult;
+  try {
+    lookup = await lookupRuc(rucValidation.data);
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Error al consultar SUNAT";
+    return failure("NOT_FOUND", message, { contact_ruc: message });
+  }
+
+  const input: CreateContactInput = {
+    tipo_persona: lookup.tipo_persona,
+    ruc: lookup.ruc,
+    dni: lookup.dni,
+    razon_social: lookup.razon_social,
+    nombre_comercial: null,
+    is_client: direction === "inbound",
+    is_vendor: direction === "outbound",
+    is_partner: false,
+    email: null,
+    phone: null,
+    address: lookup.address,
+    sunat_estado: lookup.sunat_estado,
+    sunat_condicion: lookup.sunat_condicion,
+    sunat_verified: true,
+    sunat_verified_at: nowISO(),
+    notes: null,
+  };
+
+  const { data: inserted, error } = await supabase
+    .from("contacts")
+    .insert({ ...input, created_via_inbox: true })
+    .select()
+    .single();
+
+  if (error || !inserted) {
+    return failure(
+      "VALIDATION_ERROR",
+      error?.message ?? "No se pudo crear el contacto",
+      { contact_ruc: error?.message ?? "Insert failed" },
+    );
+  }
+
+  return success(inserted as ContactRow);
+}
+
+// ---------------------------------------------------------------------------
 // updateContact
 // ---------------------------------------------------------------------------
 
