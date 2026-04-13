@@ -294,7 +294,8 @@ export function buildSubmissionFromGroup(
  * - Required header fields (date, direction, bank account, currency, contact)
  * - direction must be inbound|outbound
  * - currency must be PEN|USD
- * - exchange_rate > 0 required when currency=USD
+ * - exchange_rate, if supplied, must be > 0; blank is allowed (USD payments
+ *   resolve the rate from the exchange_rates table at approval time)
  * - is_detraction=true forces currency=PEN
  * - At least one line; every line has amount>0 and a valid line_type
  * - line_type=loan cannot be resolved from CSV (no loan id) — flagged
@@ -341,13 +342,16 @@ export function validatePaymentSubmissionData(
     });
   }
 
-  if (h.currency === "USD") {
-    if (h.exchange_rate == null || h.exchange_rate <= 0) {
-      errors.push({
-        path: "header.exchange_rate",
-        message: "Tipo de cambio requerido para pagos en USD",
-      });
-    }
+  // exchange_rate is optional at Inbox level — if the user provides it, it
+  // acts as a manual override (e.g. a bank-quoted rate that differs from
+  // BCRP). If blank, the approval path resolves the rate from the
+  // exchange_rates table using the payment_date. We only reject here when a
+  // non-positive value is explicitly supplied.
+  if (h.exchange_rate != null && h.exchange_rate <= 0) {
+    errors.push({
+      path: "header.exchange_rate",
+      message: "Tipo de cambio debe ser mayor a 0",
+    });
   }
 
   if (h.is_detraction && h.currency && h.currency !== "PEN") {
