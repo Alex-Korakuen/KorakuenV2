@@ -68,8 +68,7 @@ export function formatDate(iso: string | null | undefined): string {
   if (Number.isNaN(date.getTime())) return "—";
   const dd = String(date.getUTCDate()).padStart(2, "0");
   const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const yyyy = date.getUTCFullYear();
-  return `${dd}/${mm}/${yyyy}`;
+  return `${dd} - ${mm}`;
 }
 
 const SPANISH_MONTHS = [

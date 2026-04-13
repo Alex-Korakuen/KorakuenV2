@@ -1,0 +1,462 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  Check,
+  Link2,
+  Link2Off,
+  Trash2,
+  FileClock,
+} from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { formatPEN, formatDate } from "@/lib/format";
+import { PAYMENT_DIRECTION, PAYMENT_LINE_TYPE } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import {
+  deletePayment,
+  reconcilePayment,
+  unreconcilePayment,
+  unlinkPaymentLineFromInvoice,
+} from "@/app/actions/payments";
+import type {
+  BankAccountRow,
+  ContactRow,
+  PaymentLineRow,
+} from "@/lib/types";
+import type { PaymentWithLinesAndComputed } from "@/app/actions/payments";
+import { toast } from "sonner";
+import { LinkInvoiceDialog } from "./link-invoice-dialog";
+import { CreateExpectedInvoiceDialog } from "./create-expected-invoice-dialog";
+
+type Props = {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  payment: PaymentWithLinesAndComputed;
+  bank: BankAccountRow | undefined;
+  contraparte: ContactRow | undefined;
+  partnerContact: ContactRow | undefined;
+};
+
+const LINE_TYPE_PILL: Record<number, { label: string; className: string }> = {
+  [PAYMENT_LINE_TYPE.invoice]: {
+    label: "Factura",
+    className: "bg-sky-50 text-sky-700",
+  },
+  [PAYMENT_LINE_TYPE.detraction]: {
+    label: "Detracción",
+    className: "bg-indigo-50 text-indigo-700",
+  },
+  [PAYMENT_LINE_TYPE.bank_fee]: {
+    label: "Comisión",
+    className: "bg-stone-100 text-stone-700",
+  },
+  [PAYMENT_LINE_TYPE.loan]: {
+    label: "Préstamo",
+    className: "bg-violet-50 text-violet-700",
+  },
+  [PAYMENT_LINE_TYPE.general]: {
+    label: "General",
+    className: "bg-amber-50 text-amber-700",
+  },
+};
+
+function lineIsUnlinked(line: PaymentLineRow): boolean {
+  return (
+    line.line_type === PAYMENT_LINE_TYPE.general &&
+    line.outgoing_invoice_id == null &&
+    line.incoming_invoice_id == null &&
+    line.loan_id == null
+  );
+}
+
+export function PaymentDetailDialog({
+  open,
+  onOpenChange,
+  payment,
+  bank,
+  contraparte,
+  partnerContact,
+}: Props) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [linkingLineId, setLinkingLineId] = useState<string | null>(null);
+  const [expectingLineId, setExpectingLineId] = useState<string | null>(null);
+
+  const isInbound = payment.direction === PAYMENT_DIRECTION.inbound;
+  const sign = isInbound ? "+" : "−";
+  const amountColor = isInbound ? "text-emerald-700" : "text-amber-700";
+
+  const sortedLines = [...payment.lines].sort(
+    (a, b) => a.sort_order - b.sort_order,
+  );
+  const linesTotalPen = sortedLines.reduce(
+    (acc, l) => acc + Number(l.amount_pen),
+    0,
+  );
+  const roundedLinesTotal = Math.round(linesTotalPen * 100) / 100;
+  const matches =
+    Math.abs(roundedLinesTotal - Number(payment.total_amount_pen)) < 0.01;
+
+  function handleReconcileToggle() {
+    startTransition(async () => {
+      const result = payment.reconciled
+        ? await unreconcilePayment(payment.id)
+        : await reconcilePayment(payment.id, payment.bank_reference ?? "");
+      if (result.success) {
+        toast.success(payment.reconciled ? "Desconciliado" : "Conciliado");
+        router.refresh();
+      } else {
+        toast.error(result.error.message);
+      }
+    });
+  }
+
+  function handleDelete() {
+    startTransition(async () => {
+      const result = await deletePayment(payment.id);
+      if (result.success) {
+        toast.success("Pago eliminado");
+        setConfirmDelete(false);
+        onOpenChange(false);
+        router.refresh();
+      } else {
+        toast.error(result.error.message);
+      }
+    });
+  }
+
+  function handleUnlink(lineId: string) {
+    startTransition(async () => {
+      const result = await unlinkPaymentLineFromInvoice(lineId);
+      if (result.success) {
+        toast.success("Línea desvinculada");
+        router.refresh();
+      } else {
+        toast.error(result.error.message);
+      }
+    });
+  }
+
+  return (
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent
+          className="sm:max-w-4xl max-h-[calc(100vh-3rem)] p-0 gap-0 flex flex-col"
+          showCloseButton
+        >
+          <DialogTitle className="sr-only">
+            {payment.notes ?? "Detalle de pago"}
+          </DialogTitle>
+
+          {/* Header */}
+          <div className="flex items-center gap-3 px-6 py-4 border-b border-border">
+            <span
+              className={cn(
+                "inline-flex h-6 items-center rounded-full px-2 text-[11px] font-medium gap-1",
+                isInbound
+                  ? "bg-emerald-50 text-emerald-700"
+                  : "bg-amber-50 text-amber-700",
+              )}
+            >
+              {isInbound ? (
+                <ArrowDownLeft className="h-3 w-3" />
+              ) : (
+                <ArrowUpRight className="h-3 w-3" />
+              )}
+              {isInbound ? "Entrada" : "Salida"}
+            </span>
+            <h3 className="flex-1 min-w-0 text-base font-semibold text-foreground truncate">
+              {payment.notes ?? "Pago sin título"}
+            </h3>
+            <button
+              type="button"
+              onClick={handleReconcileToggle}
+              disabled={pending}
+              className={cn(
+                "inline-flex h-7 items-center rounded-full px-3 text-[11px] font-medium transition-colors",
+                payment.reconciled
+                  ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                  : "bg-stone-100 text-muted-foreground hover:bg-stone-200",
+              )}
+            >
+              {payment.reconciled ? (
+                <>
+                  <Check className="mr-1 h-3 w-3" />
+                  Conciliado
+                </>
+              ) : (
+                "Sin conciliar"
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(true)}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/40 hover:text-destructive hover:bg-stone-100"
+              title="Eliminar pago"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-6 py-5">
+            {/* Metadata row */}
+            <div
+              className="rounded-lg bg-background px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs"
+              style={{ border: "1px solid var(--border)" }}
+            >
+              <Meta label="Fecha" value={formatDate(payment.payment_date)} />
+              <Meta
+                label="Banco"
+                value={
+                  bank
+                    ? `${bank.name}${bank.account_number ? ` ···· ${bank.account_number.slice(-4)}` : ""}`
+                    : "—"
+                }
+              />
+              <Meta
+                label="Código"
+                value={
+                  <span className="font-mono">
+                    {payment.bank_reference ?? "—"}
+                  </span>
+                }
+              />
+              <Meta
+                label="Moneda"
+                value={
+                  <>
+                    {payment.currency}{" "}
+                    <span className={cn("tabular-nums font-medium", amountColor)}>
+                      {sign} {Number(payment.total_amount).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </>
+                }
+              />
+              {contraparte && (
+                <Meta label="Contraparte" value={contraparte.razon_social} />
+              )}
+              {partnerContact && (
+                <Meta label="Socio" value={partnerContact.razon_social} />
+              )}
+            </div>
+
+            {/* Lines */}
+            <div className="mt-4">
+              <h4 className="mb-2 text-xs font-medium text-muted-foreground">
+                Líneas del pago
+              </h4>
+              <div
+                className="rounded-lg bg-card overflow-hidden"
+                style={{ border: "1px solid var(--border)" }}
+              >
+                <table
+                  className="w-full text-sm"
+                  style={{ tableLayout: "fixed" }}
+                >
+                  <colgroup>
+                    <col style={{ width: "90px" }} />
+                    <col />
+                    <col style={{ width: "110px" }} />
+                    <col style={{ width: "110px" }} />
+                  </colgroup>
+                  <thead>
+                    <tr className="bg-background">
+                      <th className="text-left px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                        Tipo
+                      </th>
+                      <th className="text-left px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                        Detalle
+                      </th>
+                      <th className="text-right px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                        Monto
+                      </th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedLines.map((line) => {
+                      const unlinked = lineIsUnlinked(line);
+                      const pill =
+                        LINE_TYPE_PILL[line.line_type] ??
+                        LINE_TYPE_PILL[PAYMENT_LINE_TYPE.general];
+                      return (
+                        <tr
+                          key={line.id}
+                          style={{ borderTop: "1px solid var(--border)" }}
+                          className={unlinked ? "bg-amber-50/40" : ""}
+                        >
+                          <td className="px-3 py-2">
+                            <span
+                              className={cn(
+                                "inline-flex h-5 items-center rounded px-1.5 text-[10px] font-medium",
+                                pill.className,
+                              )}
+                            >
+                              {pill.label}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 overflow-hidden">
+                            <p className="truncate text-sm text-foreground">
+                              {line.notes ?? "—"}
+                            </p>
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums font-mono text-sm whitespace-nowrap">
+                            {Number(line.amount).toLocaleString("es-PE", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </td>
+                          <td className="px-2 py-2">
+                            <div className="flex items-center justify-end gap-1">
+                              {unlinked ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => setLinkingLineId(line.id)}
+                                    disabled={pending}
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded text-sky-700 hover:bg-sky-50"
+                                    style={{ border: "1px solid var(--border)" }}
+                                    title="Vincular a factura"
+                                  >
+                                    <Link2 className="h-3 w-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpectingLineId(line.id)}
+                                    disabled={pending}
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded text-amber-700 hover:bg-amber-50"
+                                    style={{ border: "1px solid var(--border)" }}
+                                    title="Crear factura esperada"
+                                  >
+                                    <FileClock className="h-3 w-3" />
+                                  </button>
+                                </>
+                              ) : line.line_type === PAYMENT_LINE_TYPE.invoice ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleUnlink(line.id)}
+                                  disabled={pending}
+                                  className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-stone-100 hover:text-destructive"
+                                  title="Desvincular factura"
+                                >
+                                  <Link2Off className="h-3 w-3" />
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr
+                      className="bg-background"
+                      style={{ borderTop: "1px solid var(--border)" }}
+                    >
+                      <td
+                        colSpan={2}
+                        className="px-3 py-2 text-[11px] text-muted-foreground"
+                      >
+                        Suma de líneas
+                      </td>
+                      <td className="text-right px-3 py-2 tabular-nums font-semibold text-foreground whitespace-nowrap">
+                        {formatPEN(roundedLinesTotal)}
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        {matches ? (
+                          <Check className="inline h-3.5 w-3.5 text-emerald-600" />
+                        ) : (
+                          <span className="text-[10px] text-amber-700">≠</span>
+                        )}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm delete */}
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar este pago?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción eliminará el pago y sus líneas. Si hay líneas vinculadas
+              a facturas, no podrás eliminarlo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={pending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {linkingLineId && (
+        <LinkInvoiceDialog
+          open={true}
+          onOpenChange={(v) => !v && setLinkingLineId(null)}
+          lineId={linkingLineId}
+          direction={payment.direction}
+          currency={payment.currency}
+          contactId={payment.contact_id}
+        />
+      )}
+
+      {expectingLineId && (
+        <CreateExpectedInvoiceDialog
+          open={true}
+          onOpenChange={(v) => !v && setExpectingLineId(null)}
+          lineId={expectingLineId}
+          payment={payment}
+          defaultContactId={payment.contact_id}
+        />
+      )}
+    </>
+  );
+}
+
+function Meta({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60">
+        {label}
+      </p>
+      <p className="text-xs text-foreground">{value}</p>
+    </div>
+  );
+}
+
