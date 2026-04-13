@@ -10,6 +10,7 @@ import { SUBMISSION_STATUS } from "@/lib/types";
 import { InboxFilters } from "./_components/inbox-filters";
 import { InboxBatchBanner } from "./_components/inbox-batch-banner";
 import { InboxTable } from "./_components/inbox-table";
+import { ImportCsvDialog } from "./_components/import-csv-dialog";
 
 type Props = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -76,10 +77,12 @@ export default async function InboxPage({ searchParams }: Props) {
         }
         right={
           <div className="flex items-center gap-4">
-            <Button size="sm" className="gap-1.5" disabled>
-              <Upload className="h-3.5 w-3.5" />
-              Importar CSV
-            </Button>
+            <ImportCsvDialog>
+              <Button size="sm" className="gap-1.5">
+                <Upload className="h-3.5 w-3.5" />
+                Importar CSV
+              </Button>
+            </ImportCsvDialog>
             <ExchangeRateChip />
           </div>
         }
