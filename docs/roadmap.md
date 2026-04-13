@@ -850,7 +850,7 @@ Financiera" page.
 
 ---
 
-### Step 13 — Dashboard UI and Partner Views
+### Step 13 — Dashboard UI and Partner Views ✅ (partner views deferred)
 
 Ships incrementally as sub-steps — each one its own Vercel deploy.
 Design language: warm, minimalist, Todoist-inspired with terracotta
@@ -900,16 +900,59 @@ Commit: `feat(ui): bancos merged into dashboard — inline CRUD + 4-digit mask`
 
 ---
 
-**Remaining sub-steps** (not yet started):
+**Sub-step 4 — Proyectos list + create dialog** ✅
+`/proyectos` list with status filter + search. `ProjectCreateDialog`
+for quick creation.
 
-- **Sub-step 4** — Proyectos list + new project form
-- **Sub-step 5** — Project detail with partners, budgets, lifecycle
-- **Sub-step 6** — Facturas emitidas CRUD (list + form + line items)
-- **Sub-step 7** — Facturas recibidas CRUD (expected → received flow)
-- **Sub-step 8** — Pagos with line editor, linking, split, expected-invoice creation
-- **Sub-step 9** — Conciliación bancaria queue
-- **Sub-step 10** — Reportes (posición financiera, proyecto, liquidación)
-- **Sub-step 11** — Vista socio (read-only, partner-scoped report actions)
+**Sub-step 5 — Project detail** ✅
+`/proyectos/[id]` with inline-editable metadata, partners (add/remove
+dialog), presupuesto table (budgets by cost category),
+lifecycle actions (activate / complete / archive / reject), socios
+chips, notes.
+
+**Sub-step 6 — Facturas emitidas** ✅
+`/facturas-emitidas` list with search + filter tabs. Create flow as
+modal (`OutgoingInvoiceDialog`). Detail/edit page at `[id]` for the
+full form variant. Line items, SUNAT fields, IGV / retención, status
+lifecycle (draft → sent → void).
+
+**Sub-step 7 — Facturas recibidas** ✅
+`/facturas-recibidas` list with Todas / Esperadas / Recibidas tabs.
+Create flow as modal (`IncomingInvoiceDialog`). Detail/edit page at
+`[id]`. Supports the expected → received flow: pay first, register
+factura later. Per-line cost category (partida).
+
+**Sub-step 8 — Pagos** ✅
+`/pagos` list with direction + unlinked filters, search, totals strip.
+`NewPaymentDialog` for creation. `PaymentDetailDialog` for
+metadata + line operations: Vincular (invoice picker sub-dialog),
+Crear esperada (creates expected incoming invoice from unlinked line),
+Desvincular, Conciliado toggle, delete payment.
+
+**Sub-step 9 — Conciliación bancaria** ✅
+`/conciliacion` with bank account single-select in top bar, Sin
+conciliar / Conciliados tabs, summary strip. Inline per-row input
+pre-filled with existing `bank_reference`; Enter/✓ confirms and focus
+jumps to next row. Conciliados view has date range filter and
+Desconciliar action with confirm. Row click opens
+`PaymentDetailDialog` for full context.
+
+**Sub-step 10 — Reportes / Liquidación** ✅
+`/reportes` page focused on settlement (liquidación). Multi-select
+project filter in top bar. When exactly 1 project is selected the
+Split column is shown; when 2+ or all are selected the column is
+rendered as "—" and rows/footer show aggregated sums across projects.
+Unassigned-costs banner shown only when > 0. Posición Financiera
+already lives in the admin home (Sub-step 1); project summary already
+lives in the project list (Sub-step 4) — not duplicated here.
+
+**Sub-step 11 — Vista socio** ⏸ Deferred indefinitely
+Partner-scoped read-only views (`/panel`, `/proyectos`, `/liquidacion`
+under the `(partner)` route group) were planned but are deferred
+while Alex is the sole user of the system. Backend actions already
+exist and can be partner-scoped later when needed. Nav entries in
+`PARTNER_NAV` will render broken links if a partner user logs in —
+that's fine for now since no partner accounts are provisioned.
 
 Key interaction conventions (locked in during Sub-step 2):
 - **Dialog** for simple creation (3–5 fields) — Nuevo contacto, Nueva cuenta
