@@ -328,15 +328,11 @@ describe("validatePaymentSubmissionData", () => {
     expect(r.errors.some((e) => e.path === "header.contact_ruc")).toBe(true);
   });
 
-  it("requires exchange_rate when currency=USD", () => {
+  it("accepts USD without an explicit exchange_rate (approval resolves it)", () => {
     const d = baseData();
     d.header.currency = "USD";
     d.header.exchange_rate = null;
-    const r = validatePaymentSubmissionData(d);
-    expect(r.valid).toBe(false);
-    expect(
-      r.errors.some((e) => e.path === "header.exchange_rate"),
-    ).toBe(true);
+    expect(validatePaymentSubmissionData(d).valid).toBe(true);
   });
 
   it("accepts USD with exchange_rate > 0", () => {
@@ -344,6 +340,17 @@ describe("validatePaymentSubmissionData", () => {
     d.header.currency = "USD";
     d.header.exchange_rate = 3.8;
     expect(validatePaymentSubmissionData(d).valid).toBe(true);
+  });
+
+  it("rejects an explicit non-positive exchange_rate", () => {
+    const d = baseData();
+    d.header.currency = "USD";
+    d.header.exchange_rate = 0;
+    const r = validatePaymentSubmissionData(d);
+    expect(r.valid).toBe(false);
+    expect(
+      r.errors.some((e) => e.path === "header.exchange_rate"),
+    ).toBe(true);
   });
 
   it("rejects is_detraction=true with USD currency", () => {

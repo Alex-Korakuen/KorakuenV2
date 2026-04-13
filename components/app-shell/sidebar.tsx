@@ -12,6 +12,13 @@ type Props = {
     displayName: string;
     email: string;
   };
+  /**
+   * Optional dynamic badges keyed by NavItem href. Value is the count
+   * displayed in a small pill next to the item. A zero or missing entry
+   * renders no badge. Kept separate from nav-config so the static nav
+   * definition stays pure.
+   */
+  badges?: Record<string, number>;
 };
 
 function isActive(pathname: string, href: string): boolean {
@@ -32,15 +39,18 @@ function getInitials(displayName: string, email: string): string {
 function NavGroupBlock({
   group,
   pathname,
+  badges,
 }: {
   group: NavGroup;
   pathname: string;
+  badges?: Record<string, number>;
 }) {
   return (
     <div className="space-y-0.5">
       {group.items.map((item) => {
         const active = isActive(pathname, item.href);
         const Icon = item.icon;
+        const badgeCount = badges?.[item.href] ?? 0;
         return (
           <Link
             key={item.href}
@@ -58,7 +68,12 @@ function NavGroupBlock({
                 active ? "text-primary" : "text-muted-foreground/60",
               )}
             />
-            {item.label}
+            <span className="flex-1">{item.label}</span>
+            {badgeCount > 0 ? (
+              <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold text-white">
+                {badgeCount > 99 ? "99+" : badgeCount}
+              </span>
+            ) : null}
           </Link>
         );
       })}
@@ -66,7 +81,7 @@ function NavGroupBlock({
   );
 }
 
-export function Sidebar({ variant, user }: Props) {
+export function Sidebar({ variant, user, badges }: Props) {
   const pathname = usePathname();
   const groups = variant === "admin" ? ADMIN_NAV : PARTNER_NAV;
   const initials = getInitials(user.displayName, user.email);
@@ -83,7 +98,11 @@ export function Sidebar({ variant, user }: Props) {
         {groups.map((group, idx) => (
           <div key={idx}>
             {idx > 0 && <div className="my-3 border-t border-border/60" />}
-            <NavGroupBlock group={group} pathname={pathname} />
+            <NavGroupBlock
+              group={group}
+              pathname={pathname}
+              badges={badges}
+            />
           </div>
         ))}
       </nav>

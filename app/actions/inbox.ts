@@ -47,6 +47,7 @@ import {
 } from "@/lib/validators/inbox";
 import { findOrCreateContactByRuc } from "./contacts";
 import { createPayment } from "./payments";
+import { requireExactExchangeRate } from "@/lib/exchange-rate";
 import { computeOutgoingInvoicePaymentProgressBatch } from "@/lib/outgoing-invoice-computed";
 import { computeIncomingInvoicePaymentProgressBatch } from "@/lib/incoming-invoice-computed";
 
@@ -507,6 +508,33 @@ export async function getLinkableInvoicesForContact(params: {
 }
 
 // ---------------------------------------------------------------------------
+// getInboxPendingCount — drives the sidebar badge
+// ---------------------------------------------------------------------------
+
+/**
+ * Count of pending submissions across all source types. Used by the
+ * admin sidebar to render a badge next to the Inbox nav item.
+ *
+ * Returns 0 on any error rather than failing — a broken count should
+ * not break the entire layout render.
+ */
+export async function getInboxPendingCount(): Promise<number> {
+  try {
+    await requireAdmin();
+    const supabase = await createServerClient();
+    const { count, error } = await supabase
+      .from("submissions")
+      .select("id", { count: "exact", head: true })
+      .eq("review_status", SUBMISSION_STATUS.pending)
+      .is("deleted_at", null);
+    if (error) return 0;
+    return count ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // getInboxBatches
 // ---------------------------------------------------------------------------
 
@@ -674,7 +702,10 @@ export async function approveSubmission(
   }
 
   // Build createPayment input
-  const build = buildCreatePaymentInputFromSubmission(extracted, submissionId);
+  const build = await buildCreatePaymentInputFromSubmission(
+    extracted,
+    submissionId,
+  );
   if (!build.success) {
     await persistValidationErrors(
       supabase,
@@ -847,13 +878,15 @@ export async function approveBatchValid(
 // buildCreatePaymentInputFromSubmission (internal)
 // ---------------------------------------------------------------------------
 
-function buildCreatePaymentInputFromSubmission(
+async function buildCreatePaymentInputFromSubmission(
   extracted: PaymentSubmissionExtractedData,
   submissionId: string,
-): ValidationResult<{
-  data: CreatePaymentInput;
-  lines: CreatePaymentLineInput[];
-}> {
+): Promise<
+  ValidationResult<{
+    data: CreatePaymentInput;
+    lines: CreatePaymentLineInput[];
+  }>
+> {
   const h = extracted.header;
 
   // These should have been caught by validateApproveSubmission already,
@@ -875,13 +908,29 @@ function buildCreatePaymentInputFromSubmission(
       ? PAYMENT_DIRECTION.inbound
       : PAYMENT_DIRECTION.outbound;
 
+  // Resolve the exchange rate for USD payments. A value supplied on the CSV
+  // (or edited in the Inbox) acts as a manual override. Otherwise look it up
+  // from the exchange_rates table for the exact payment_date — same rule
+  // outgoing invoices use. If no rate exists for that date, approval fails
+  // with a message pointing the user to Ajustes → Tipos de Cambio.
+  let resolvedExchangeRate: number | null = h.exchange_rate;
+  if (h.currency === "USD" && resolvedExchangeRate == null) {
+    const rateLookup = await requireExactExchangeRate(h.payment_date);
+    if (!rateLookup.success) {
+      return failure(rateLookup.error.code, rateLookup.error.message, {
+        "header.exchange_rate": rateLookup.error.message,
+      });
+    }
+    resolvedExchangeRate = rateLookup.data.rate;
+  }
+
   const data: CreatePaymentInput = {
     direction: directionCode,
     bank_account_id: h.bank_account_id,
     project_id: h.project_id,
     contact_id: h.contact_id,
     currency: h.currency,
-    exchange_rate: h.exchange_rate,
+    exchange_rate: resolvedExchangeRate,
     payment_date: h.payment_date,
     bank_reference: h.bank_reference,
     notes: h.notes,
@@ -889,22 +938,7 @@ function buildCreatePaymentInputFromSubmission(
     submission_id: submissionId,
   };
 
-  // Compute amount_pen per line. For PEN, it's equal to amount. For USD,
-  // multiply by exchange_rate. If exchange_rate is null for USD, createPayment
-  // will look it up from the exchange_rates table — but amount_pen is still
-  // required on insert, so we need a fallback. We refuse the build if USD
-  // without rate is hit here; the user needs to fill in the rate first.
-  let ratePerPen = 1;
-  if (h.currency === "USD") {
-    if (h.exchange_rate == null || h.exchange_rate <= 0) {
-      return failure(
-        "VALIDATION_ERROR",
-        "Tipo de cambio requerido para pagos en USD",
-        { "header.exchange_rate": "Required for USD" },
-      );
-    }
-    ratePerPen = h.exchange_rate;
-  }
+  const ratePerPen = h.currency === "USD" ? resolvedExchangeRate ?? 1 : 1;
 
   const lines: CreatePaymentLineInput[] = extracted.lines.map((l, idx) => {
     const amount = l.amount ?? 0;
