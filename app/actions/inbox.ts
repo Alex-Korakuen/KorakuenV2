@@ -16,6 +16,8 @@ import {
   SOURCE,
   PAYMENT_DIRECTION,
   PAYMENT_LINE_TYPE,
+  OUTGOING_INVOICE_STATUS,
+  INCOMING_INVOICE_FACTURA_STATUS,
 } from "@/lib/types";
 import type {
   ValidationResult,
@@ -45,6 +47,8 @@ import {
 } from "@/lib/validators/inbox";
 import { findOrCreateContactByRuc } from "./contacts";
 import { createPayment } from "./payments";
+import { computeOutgoingInvoicePaymentProgressBatch } from "@/lib/outgoing-invoice-computed";
+import { computeIncomingInvoicePaymentProgressBatch } from "@/lib/incoming-invoice-computed";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -353,6 +357,153 @@ export async function getInboxSubmissions(
     limit,
     offset,
   });
+}
+
+// ---------------------------------------------------------------------------
+// getLinkableInvoicesForContact (Phase E polish — invoice combobox)
+// ---------------------------------------------------------------------------
+
+export type LinkableInvoice = {
+  id: string;
+  serie_numero: string;
+  fecha_emision: string | null;
+  total_pen: number;
+  outstanding_pen: number;
+  currency: string;
+};
+
+/**
+ * List the invoices that a staged payment line could link to, given the
+ * payment's direction and contact.
+ *
+ *   - inbound  → outgoing_invoices whose project.client_id matches the contact
+ *   - outbound → incoming_invoices whose contact_id matches the contact
+ *
+ * Filters:
+ *   - Not soft-deleted
+ *   - Status is the "committed" value for that invoice type
+ *   - Remaining balance > 0 (fully-paid invoices hidden)
+ *
+ * Sorted by fecha_emision DESC, capped at 50.
+ *
+ * When contactId is null the action returns an empty list — callers are
+ * expected to gate the combobox open state on having a resolved contact.
+ */
+export async function getLinkableInvoicesForContact(params: {
+  direction: "inbound" | "outbound";
+  contactId: string | null;
+}): Promise<ValidationResult<LinkableInvoice[]>> {
+  await requireAdmin();
+
+  if (!params.contactId) return success([]);
+
+  const supabase = await createServerClient();
+
+  if (params.direction === "inbound") {
+    // Outgoing invoices live in our revenue pipeline. They reach a client
+    // via projects.client_id, so we filter invoices whose project belongs
+    // to this contact.
+    const { data: projectIds, error: projError } = await supabase
+      .from("projects")
+      .select("id")
+      .eq("client_id", params.contactId)
+      .is("deleted_at", null);
+    if (projError) {
+      return failure(
+        "NOT_FOUND",
+        `No se pudieron cargar proyectos del cliente: ${projError.message}`,
+      );
+    }
+    const ids = (projectIds ?? []).map((p) => p.id);
+    if (ids.length === 0) return success([]);
+
+    const { data: invoices, error } = await supabase
+      .from("outgoing_invoices")
+      .select(
+        "id, serie_numero, fecha_emision, total_pen, currency, estado_sunat",
+      )
+      .in("project_id", ids)
+      .eq("status", OUTGOING_INVOICE_STATUS.sent)
+      .is("deleted_at", null)
+      .order("fecha_emision", { ascending: false })
+      .limit(50);
+    if (error) {
+      return failure(
+        "NOT_FOUND",
+        `No se pudieron cargar facturas emitidas: ${error.message}`,
+      );
+    }
+
+    const rows = (invoices ?? []).filter((i) => i.serie_numero);
+    const computed = await computeOutgoingInvoicePaymentProgressBatch(
+      supabase,
+      rows.map((r) => ({
+        id: r.id as string,
+        total_pen: Number(r.total_pen),
+        estado_sunat: (r.estado_sunat as string | null) ?? null,
+      })),
+    );
+
+    const out: LinkableInvoice[] = [];
+    for (const r of rows) {
+      const c = computed.get(r.id as string);
+      if (!c) continue;
+      if (c.outstanding <= 0.0049) continue; // tolerance for rounding
+      out.push({
+        id: r.id as string,
+        serie_numero: r.serie_numero as string,
+        fecha_emision: (r.fecha_emision as string | null) ?? null,
+        total_pen: Number(r.total_pen),
+        outstanding_pen: c.outstanding,
+        currency: (r.currency as string) ?? "PEN",
+      });
+    }
+    return success(out);
+  }
+
+  // Outbound: our incoming invoices from vendors, filtered by contact_id.
+  const { data: invoices, error } = await supabase
+    .from("incoming_invoices")
+    .select(
+      "id, serie_numero, fecha_emision, total_pen, currency, factura_status",
+    )
+    .eq("contact_id", params.contactId)
+    .eq("factura_status", INCOMING_INVOICE_FACTURA_STATUS.received)
+    .is("deleted_at", null)
+    .order("fecha_emision", { ascending: false })
+    .limit(50);
+  if (error) {
+    return failure(
+      "NOT_FOUND",
+      `No se pudieron cargar facturas recibidas: ${error.message}`,
+    );
+  }
+
+  const rows = (invoices ?? []).filter((i) => i.serie_numero);
+  const computed = await computeIncomingInvoicePaymentProgressBatch(
+    supabase,
+    rows.map((r) => ({
+      id: r.id as string,
+      total_pen: Number(r.total_pen),
+      factura_status: r.factura_status as number,
+    })),
+  );
+
+  const out: LinkableInvoice[] = [];
+  for (const r of rows) {
+    const c = computed.get(r.id as string);
+    if (!c) continue;
+    if (c.outstanding <= 0.0049) continue;
+    out.push({
+      id: r.id as string,
+      serie_numero: r.serie_numero as string,
+      fecha_emision: (r.fecha_emision as string | null) ?? null,
+      total_pen: Number(r.total_pen),
+      outstanding_pen: c.outstanding,
+      currency: (r.currency as string) ?? "PEN",
+    });
+  }
+  return success(out);
 }
 
 // ---------------------------------------------------------------------------

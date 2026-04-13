@@ -747,6 +747,95 @@ describe("applyPatchToExtractedData", () => {
     expect(r.success).toBe(false);
   });
 
+  it("clears every line's invoice links when contact_ruc changes", () => {
+    const src = baseData();
+    src.lines[0].outgoing_invoice_id = "inv-old-1";
+    src.lines[0].invoice_number_hint = "F001-00001";
+    src.lines.push({
+      amount: 50,
+      line_type: "invoice",
+      invoice_number_hint: "F001-00002",
+      outgoing_invoice_id: "inv-old-2",
+      incoming_invoice_id: null,
+      cost_category_label: null,
+      cost_category_id: null,
+      notes: null,
+    });
+
+    const r = applyPatchToExtractedData(src, {
+      kind: "set_header",
+      field: "contact_ruc",
+      value: "20999999999",
+    });
+    if (!r.success) throw new Error("should succeed");
+
+    expect(r.data.header.contact_ruc).toBe("20999999999");
+    expect(r.data.header.contact_id).toBeNull();
+    for (const line of r.data.lines) {
+      expect(line.outgoing_invoice_id).toBeNull();
+      expect(line.incoming_invoice_id).toBeNull();
+      expect(line.invoice_number_hint).toBeNull();
+    }
+    // Original untouched
+    expect(src.lines[0].outgoing_invoice_id).toBe("inv-old-1");
+  });
+
+  it("set_line_invoice stores hint + outgoing id for inbound", () => {
+    const src = baseData();
+    const r = applyPatchToExtractedData(src, {
+      kind: "set_line_invoice",
+      index: 0,
+      hint: "F001-00089",
+      invoiceId: "inv-abc",
+      direction: "inbound",
+    });
+    if (!r.success) throw new Error("should succeed");
+    expect(r.data.lines[0].invoice_number_hint).toBe("F001-00089");
+    expect(r.data.lines[0].outgoing_invoice_id).toBe("inv-abc");
+    expect(r.data.lines[0].incoming_invoice_id).toBeNull();
+  });
+
+  it("set_line_invoice stores hint + incoming id for outbound", () => {
+    const src = baseData();
+    const r = applyPatchToExtractedData(src, {
+      kind: "set_line_invoice",
+      index: 0,
+      hint: "F002-00012",
+      invoiceId: "inv-xyz",
+      direction: "outbound",
+    });
+    if (!r.success) throw new Error("should succeed");
+    expect(r.data.lines[0].invoice_number_hint).toBe("F002-00012");
+    expect(r.data.lines[0].incoming_invoice_id).toBe("inv-xyz");
+    expect(r.data.lines[0].outgoing_invoice_id).toBeNull();
+  });
+
+  it("set_line_invoice with null invoiceId stores hint only (expected invoice path)", () => {
+    const src = baseData();
+    const r = applyPatchToExtractedData(src, {
+      kind: "set_line_invoice",
+      index: 0,
+      hint: "F999-00099",
+      invoiceId: null,
+      direction: "outbound",
+    });
+    if (!r.success) throw new Error("should succeed");
+    expect(r.data.lines[0].invoice_number_hint).toBe("F999-00099");
+    expect(r.data.lines[0].incoming_invoice_id).toBeNull();
+    expect(r.data.lines[0].outgoing_invoice_id).toBeNull();
+  });
+
+  it("set_line_invoice rejects out-of-range index", () => {
+    const r = applyPatchToExtractedData(baseData(), {
+      kind: "set_line_invoice",
+      index: 99,
+      hint: "F",
+      invoiceId: null,
+      direction: "inbound",
+    });
+    expect(r.success).toBe(false);
+  });
+
   it("rejects out-of-range index on delete_line", () => {
     const src = baseData();
     src.lines.push({ ...src.lines[0] });

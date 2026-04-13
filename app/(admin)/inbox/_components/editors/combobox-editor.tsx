@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Loader2, Plus } from "lucide-react";
 import {
   Command,
   CommandEmpty,
@@ -24,11 +24,23 @@ export type ComboboxOption = {
   hint?: string;
 };
 
+export type ComboboxSelection =
+  | { kind: "option"; option: ComboboxOption }
+  | { kind: "create"; query: string }
+  | { kind: "clear" };
+
 type Props = {
   config: ComboboxEditorConfig;
-  options: ComboboxOption[];
+  /** Preloaded options — only used when asyncLoad is not provided. */
+  options?: ComboboxOption[];
+  /** Async loader — takes priority over preloaded options. */
+  asyncLoad?: () => Promise<ComboboxOption[]>;
+  /** Shown when async load is blocked (e.g. contact not set yet). */
+  disabledReason?: string;
+  /** Label for a "create with this query" tail option, if applicable. */
+  createTailLabel?: (query: string) => string;
   initialValue: string | null;
-  onSave: (next: string | null) => void;
+  onPick: (selection: ComboboxSelection) => void;
   onCancel: () => void;
 };
 
@@ -40,17 +52,48 @@ type Props = {
  * an id.
  */
 export function ComboboxEditor({
-  options,
+  options: preloadedOptions,
+  asyncLoad,
+  disabledReason,
+  createTailLabel,
   initialValue,
-  onSave,
+  onPick,
   onCancel,
 }: Props) {
   const [open, setOpen] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [loadedOptions, setLoadedOptions] = useState<ComboboxOption[] | null>(
+    null,
+  );
+  const [query, setQuery] = useState("");
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     triggerRef.current?.focus();
   }, []);
+
+  // Async load on mount, once. If disabledReason is set we skip entirely.
+  useEffect(() => {
+    if (disabledReason) return;
+    if (!asyncLoad) return;
+    let cancelled = false;
+    setLoading(true);
+    asyncLoad()
+      .then((opts) => {
+        if (!cancelled) setLoadedOptions(opts);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const options = asyncLoad
+    ? loadedOptions ?? []
+    : preloadedOptions ?? [];
 
   const selected = useMemo(
     () => options.find((o) => o.value === initialValue) ?? null,
@@ -64,6 +107,15 @@ export function ComboboxEditor({
       onCancel();
     }
   }
+
+  const showCreateTail =
+    createTailLabel !== undefined &&
+    query.trim().length > 0 &&
+    !options.some(
+      (o) =>
+        o.label.toLowerCase() === query.trim().toLowerCase() ||
+        o.value.toLowerCase() === query.trim().toLowerCase(),
+    );
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
@@ -81,50 +133,94 @@ export function ComboboxEditor({
         </button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-[min(360px,var(--radix-popover-trigger-width))] p-0"
+        className="w-[min(420px,var(--radix-popover-trigger-width))] p-0"
         align="start"
         onClick={(e) => e.stopPropagation()}
       >
-        <Command>
-          <CommandInput placeholder="Buscar…" />
-          <CommandList>
-            <CommandEmpty>Sin resultados.</CommandEmpty>
-            {options.map((opt) => (
-              <CommandItem
-                key={opt.id}
-                value={`${opt.label} ${opt.hint ?? ""}`}
-                onSelect={() => {
-                  setOpen(false);
-                  onSave(opt.value);
-                }}
-              >
-                <Check
-                  className={`mr-2 h-3.5 w-3.5 ${
-                    initialValue === opt.value ? "opacity-100" : "opacity-0"
-                  }`}
-                />
-                <div className="flex flex-col min-w-0">
-                  <span className="truncate text-sm">{opt.label}</span>
-                  {opt.hint ? (
-                    <span className="truncate text-[11px] text-muted-foreground">
-                      {opt.hint}
-                    </span>
-                  ) : null}
+        {disabledReason ? (
+          <div className="px-4 py-6 text-center text-xs text-muted-foreground">
+            {disabledReason}
+          </div>
+        ) : (
+          <Command shouldFilter={asyncLoad ? false : true}>
+            <CommandInput
+              placeholder="Buscar…"
+              value={query}
+              onValueChange={setQuery}
+            />
+            <CommandList>
+              {loading ? (
+                <div className="flex items-center justify-center py-6 text-xs text-muted-foreground">
+                  <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                  Cargando…
                 </div>
-              </CommandItem>
-            ))}
-            <CommandItem
-              value="__clear__"
-              onSelect={() => {
-                setOpen(false);
-                onSave(null);
-              }}
-              className="text-muted-foreground"
-            >
-              Limpiar campo
-            </CommandItem>
-          </CommandList>
-        </Command>
+              ) : (
+                <>
+                  <CommandEmpty>Sin resultados.</CommandEmpty>
+                  {options
+                    .filter((opt) => {
+                      if (!asyncLoad) return true;
+                      if (!query.trim()) return true;
+                      const q = query.trim().toLowerCase();
+                      return (
+                        opt.label.toLowerCase().includes(q) ||
+                        (opt.hint?.toLowerCase().includes(q) ?? false)
+                      );
+                    })
+                    .map((opt) => (
+                      <CommandItem
+                        key={opt.id}
+                        value={`${opt.label} ${opt.hint ?? ""}`}
+                        onSelect={() => {
+                          setOpen(false);
+                          onPick({ kind: "option", option: opt });
+                        }}
+                      >
+                        <Check
+                          className={`mr-2 h-3.5 w-3.5 ${
+                            initialValue === opt.value
+                              ? "opacity-100"
+                              : "opacity-0"
+                          }`}
+                        />
+                        <div className="flex flex-col min-w-0">
+                          <span className="truncate text-sm">{opt.label}</span>
+                          {opt.hint ? (
+                            <span className="truncate text-[11px] text-muted-foreground">
+                              {opt.hint}
+                            </span>
+                          ) : null}
+                        </div>
+                      </CommandItem>
+                    ))}
+                  {showCreateTail ? (
+                    <CommandItem
+                      value={`__create__:${query}`}
+                      onSelect={() => {
+                        setOpen(false);
+                        onPick({ kind: "create", query: query.trim() });
+                      }}
+                      className="text-primary"
+                    >
+                      <Plus className="mr-2 h-3.5 w-3.5" />
+                      {createTailLabel!(query.trim())}
+                    </CommandItem>
+                  ) : null}
+                  <CommandItem
+                    value="__clear__"
+                    onSelect={() => {
+                      setOpen(false);
+                      onPick({ kind: "clear" });
+                    }}
+                    className="text-muted-foreground"
+                  >
+                    Limpiar campo
+                  </CommandItem>
+                </>
+              )}
+            </CommandList>
+          </Command>
+        )}
       </PopoverContent>
     </Popover>
   );

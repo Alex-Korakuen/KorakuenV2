@@ -20,6 +20,7 @@ import {
   updateSubmission,
   addSubmissionLine,
   deleteSubmissionLine,
+  getLinkableInvoicesForContact,
 } from "@/app/actions/inbox";
 import { SUBMISSION_STATUS } from "@/lib/types";
 import type {
@@ -555,6 +556,8 @@ function PaymentGroupRow({
           onDeleteLine={onDeleteLine}
           readOnly={readOnly}
           costCategoryOptions={costCategoryOptions}
+          headerContactId={header.contact_id}
+          headerDirection={header.direction}
         />
       ) : null}
     </>
@@ -576,6 +579,8 @@ function DetailPanel({
   onDeleteLine,
   readOnly,
   costCategoryOptions,
+  headerContactId,
+  headerDirection,
 }: {
   data: PaymentSubmissionExtractedData;
   submissionId: string;
@@ -587,6 +592,8 @@ function DetailPanel({
   onDeleteLine: (index: number) => void;
   readOnly: boolean;
   costCategoryOptions: ComboboxOption[];
+  headerContactId: string | null;
+  headerDirection: "inbound" | "outbound" | null;
 }) {
   const editProps = { activeEditId, onBeginEdit, onFinishEdit, readOnly };
 
@@ -721,7 +728,7 @@ function DetailPanel({
                         }
                       />
                     </td>
-                    {/* Invoice number hint */}
+                    {/* Invoice number — combobox of outstanding invoices for the contact */}
                     <td className="px-3 py-2">
                       <EditableCell
                         {...editProps}
@@ -733,14 +740,64 @@ function DetailPanel({
                             {line.invoice_number_hint ?? "—"}
                           </span>
                         }
-                        onSave={(next) =>
-                          onPatch({
-                            kind: "set_line",
-                            index: i,
-                            field: "invoice_number_hint",
-                            value: next,
-                          })
+                        comboboxAsyncLoad={
+                          headerContactId && headerDirection
+                            ? async () => {
+                                const r = await getLinkableInvoicesForContact({
+                                  direction: headerDirection,
+                                  contactId: headerContactId,
+                                });
+                                if (!r.success) return [];
+                                return r.data.map((inv) => ({
+                                  id: inv.id,
+                                  label: inv.serie_numero,
+                                  value: inv.serie_numero,
+                                  hint: `${formatPEN(inv.outstanding_pen)} pendiente · ${inv.fecha_emision ?? ""}`,
+                                }));
+                              }
+                            : undefined
                         }
+                        comboboxDisabledReason={
+                          !headerContactId
+                            ? "Primero resuelve el contacto del pago"
+                            : undefined
+                        }
+                        comboboxCreateTailLabel={(q) =>
+                          `Usar "${q}" como factura esperada`
+                        }
+                        onComboboxPick={(selection) => {
+                          if (!headerDirection) return;
+                          if (selection.kind === "option") {
+                            onPatch({
+                              kind: "set_line_invoice",
+                              index: i,
+                              hint: selection.option.label,
+                              invoiceId: selection.option.id,
+                              direction: headerDirection,
+                            });
+                          } else if (selection.kind === "create") {
+                            // Hint-only: the invoice will be created at
+                            // approval time per Option B.
+                            onPatch({
+                              kind: "set_line_invoice",
+                              index: i,
+                              hint: selection.query,
+                              invoiceId: null,
+                              direction: headerDirection,
+                            });
+                          } else {
+                            onPatch({
+                              kind: "set_line_invoice",
+                              index: i,
+                              hint: null,
+                              invoiceId: null,
+                              direction: headerDirection,
+                            });
+                          }
+                        }}
+                        onSave={() => {
+                          /* unused — onComboboxPick handles all selection types */
+                        }}
                       />
                     </td>
                     <td

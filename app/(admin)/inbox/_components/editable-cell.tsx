@@ -7,6 +7,7 @@ import { EnumEditor } from "./editors/enum-editor";
 import {
   ComboboxEditor,
   type ComboboxOption,
+  type ComboboxSelection,
 } from "./editors/combobox-editor";
 import type { EditorConfig } from "./editors/field-config";
 
@@ -30,8 +31,21 @@ type Props = {
   /** Called with the new value on save. Parent handles the server call. */
   onSave: (next: string | number | null) => void;
 
-  /** Combobox options, only used when config.kind === "combobox". */
+  /** Combobox — preloaded options. */
   comboboxOptions?: ComboboxOption[];
+  /** Combobox — async loader used instead of `comboboxOptions`. */
+  comboboxAsyncLoad?: () => Promise<ComboboxOption[]>;
+  /** Combobox — shown when async load is gated (e.g. contact unset). */
+  comboboxDisabledReason?: string;
+  /** Combobox — label for the "create with this query" tail option. */
+  comboboxCreateTailLabel?: (query: string) => string;
+  /**
+   * Combobox — alternate handler that receives the full selection shape
+   * (option pick, create tail, clear). Overrides `onSave` when present.
+   * Used by the invoice cell to dispatch a `set_line_invoice` patch that
+   * carries both the label and the resolved id.
+   */
+  onComboboxPick?: (selection: ComboboxSelection) => void;
 
   /** Disables editing entirely (e.g. submission is approved). */
   readOnly?: boolean;
@@ -55,6 +69,10 @@ export function EditableCell({
   display,
   onSave,
   comboboxOptions,
+  comboboxAsyncLoad,
+  comboboxDisabledReason,
+  comboboxCreateTailLabel,
+  onComboboxPick,
   readOnly,
   className,
 }: Props) {
@@ -94,10 +112,23 @@ export function EditableCell({
         ) : (
           <ComboboxEditor
             config={config}
-            options={comboboxOptions ?? []}
+            options={comboboxOptions}
+            asyncLoad={comboboxAsyncLoad}
+            disabledReason={comboboxDisabledReason}
+            createTailLabel={comboboxCreateTailLabel}
             initialValue={value == null ? null : String(value)}
-            onSave={(next) => {
-              onSave(next);
+            onPick={(selection) => {
+              if (onComboboxPick) {
+                onComboboxPick(selection);
+              } else if (selection.kind === "option") {
+                onSave(selection.option.value);
+              } else if (selection.kind === "clear") {
+                onSave(null);
+              } else {
+                // create tail fallback for non-invoice combos that
+                // happen to show a create tail — stores the query text
+                onSave(selection.query);
+              }
               onFinishEdit();
             }}
             onCancel={onFinishEdit}

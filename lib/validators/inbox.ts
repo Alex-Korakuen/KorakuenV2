@@ -618,6 +618,18 @@ export type SubmissionPatch =
       field: LineEditableField;
       value: unknown;
     }
+  | {
+      /**
+       * Dedicated patch for invoice combobox picks. Updates the hint
+       * text and the resolved id together so they stay in sync. The
+       * direction determines which FK column receives the id.
+       */
+      kind: "set_line_invoice";
+      index: number;
+      hint: string | null;
+      invoiceId: string | null;
+      direction: "inbound" | "outbound";
+    }
   | { kind: "add_line" }
   | { kind: "delete_line"; index: number };
 
@@ -659,6 +671,14 @@ export function applyPatchToExtractedData(
         next.header.project_id = null;
       } else if (patch.field === "contact_ruc") {
         next.header.contact_id = null;
+        // Linked invoices belong to the old contact — wipe every line's
+        // resolved id so stale links can't sneak through approval.
+        next.lines = next.lines.map((l) => ({
+          ...l,
+          outgoing_invoice_id: null,
+          incoming_invoice_id: null,
+          invoice_number_hint: null,
+        }));
       }
       return success(next);
     }
@@ -680,6 +700,27 @@ export function applyPatchToExtractedData(
       }
       if (patch.field === "cost_category_label") {
         line.cost_category_id = null;
+      }
+      next.lines[patch.index] = line;
+      return success(next);
+    }
+    case "set_line_invoice": {
+      if (patch.index < 0 || patch.index >= next.lines.length) {
+        return failure("VALIDATION_ERROR", "Índice de línea fuera de rango", {
+          index: `Must be 0..${next.lines.length - 1}`,
+        });
+      }
+      const line = { ...next.lines[patch.index] };
+      line.invoice_number_hint = patch.hint;
+      // Exactly one of the two FK columns holds the id depending on
+      // direction; the other must stay null (pl_invoice_exclusive CHECK
+      // constraint on payment_lines).
+      if (patch.direction === "inbound") {
+        line.outgoing_invoice_id = patch.invoiceId;
+        line.incoming_invoice_id = null;
+      } else {
+        line.incoming_invoice_id = patch.invoiceId;
+        line.outgoing_invoice_id = null;
       }
       next.lines[patch.index] = line;
       return success(next);

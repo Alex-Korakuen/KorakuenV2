@@ -27,7 +27,12 @@ export type EnumEditorConfig = {
 
 export type ComboboxEditorConfig = {
   kind: "combobox";
-  source: "bankAccounts" | "projects" | "contacts" | "costCategories";
+  source:
+    | "bankAccounts"
+    | "projects"
+    | "contacts"
+    | "costCategories"
+    | "invoices";
 };
 
 export type EditorConfig =
@@ -63,7 +68,7 @@ export const LINE_FIELD_EDITORS = {
       ["general", "general"],
     ],
   },
-  invoice_number_hint: { kind: "input", inputType: "text", placeholder: "F001-00001" },
+  invoice_number_hint: { kind: "combobox", source: "invoices" },
   cost_category_label: { kind: "combobox", source: "costCategories" },
   notes: { kind: "input", inputType: "text" },
 } as const satisfies Record<string, EditorConfig>;
