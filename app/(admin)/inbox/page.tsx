@@ -10,6 +10,7 @@ import { SUBMISSION_STATUS } from "@/lib/types";
 import { InboxFilters } from "./_components/inbox-filters";
 import { InboxBatchBanner } from "./_components/inbox-batch-banner";
 import { InboxTable } from "./_components/inbox-table";
+import { InboxSourceTabs } from "./_components/inbox-source-tabs";
 import { ImportCsvDialog } from "./_components/import-csv-dialog";
 
 type Props = {
@@ -95,6 +96,14 @@ export default async function InboxPage({ searchParams }: Props) {
           filter={statusParam || "pendientes"}
           batches={batches}
         />
+
+        <div className="mt-6">
+          <InboxSourceTabs
+            paymentCount={
+              submissionsResult.success ? submissionsResult.data.total : 0
+            }
+          />
+        </div>
 
         {activeBatch ? (
           <div className="mt-5">

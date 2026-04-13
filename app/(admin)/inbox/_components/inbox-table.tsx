@@ -9,8 +9,10 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  FileSpreadsheet,
   Plus,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatPEN, formatDate } from "@/lib/format";
@@ -33,6 +35,7 @@ import type {
 } from "@/lib/types";
 import type { SubmissionPatch } from "@/lib/validators/inbox";
 import { EditableCell } from "./editable-cell";
+import { ImportCsvDialog } from "./import-csv-dialog";
 import type { ComboboxOption } from "./editors/combobox-editor";
 import {
   HEADER_FIELD_EDITORS,
@@ -189,10 +192,25 @@ export function InboxTable({
 
   if (submissions.length === 0) {
     return (
-      <div className="rounded-lg border border-border bg-card py-16 text-center">
-        <p className="text-sm text-muted-foreground">
-          No hay registros en la bandeja.
+      <div className="flex flex-col items-center rounded-lg border border-border bg-card px-6 py-16 text-center">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+          <FileSpreadsheet className="h-5 w-5 text-primary" />
+        </div>
+        <p className="mt-4 text-sm font-medium text-foreground">
+          No hay registros en la bandeja
         </p>
+        <p className="mt-1 max-w-sm text-xs text-muted-foreground">
+          Importa un CSV con tus pagos para revisarlos y aprobarlos antes
+          de que entren al sistema.
+        </p>
+        <div className="mt-5">
+          <ImportCsvDialog>
+            <Button size="sm" className="gap-1.5">
+              <Upload className="h-3.5 w-3.5" />
+              Importar CSV
+            </Button>
+          </ImportCsvDialog>
+        </div>
       </div>
     );
   }
