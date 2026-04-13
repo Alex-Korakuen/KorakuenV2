@@ -1,13 +1,10 @@
-import Link from "next/link";
 import {
   ArrowDownCircle,
   ArrowUpCircle,
-  FolderPlus,
   Landmark,
   Pencil,
   Plus,
   Receipt,
-  UserPlus,
   Wallet,
 } from "lucide-react";
 import { requireAdmin } from "@/lib/auth";
@@ -186,42 +183,6 @@ export default async function AdminDashboard() {
         )}
       </div>
 
-      {/* Quick actions */}
-      <div className="mt-10">
-        <h3 className="mb-3 text-sm font-medium text-muted-foreground">
-          Acciones rápidas
-        </h3>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Link
-            href="/contactos"
-            className="group flex items-center gap-3 rounded-lg border border-border p-4 transition-colors hover:border-primary/30 hover:bg-accent"
-          >
-            <UserPlus className="h-5 w-5 shrink-0 text-muted-foreground group-hover:text-muted-foreground" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-foreground">
-                Nuevo contacto
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Buscar por RUC o DNI en SUNAT
-              </p>
-            </div>
-          </Link>
-          <Link
-            href="/proyectos/nuevo"
-            className="group flex items-center gap-3 rounded-lg border border-border p-4 transition-colors hover:border-primary/30 hover:bg-accent"
-          >
-            <FolderPlus className="h-5 w-5 shrink-0 text-muted-foreground group-hover:text-muted-foreground" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-foreground">
-                Nuevo proyecto
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Registrar una obra y configurar socios
-              </p>
-            </div>
-          </Link>
-        </div>
-      </div>
     </div>
     </div>
   );
