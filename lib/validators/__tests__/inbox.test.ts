@@ -314,15 +314,17 @@ describe("validatePaymentSubmissionData", () => {
     expect(r.valid).toBe(true);
   });
 
-  it("rejects missing contact RUC", () => {
+  it("accepts missing contact RUC (informal / unknown counterparty)", () => {
+    // Peru's informal economy: cash purchases from vendors without a RUC,
+    // ambiguous bank deposits, etc. The payment still needs to be recorded;
+    // the by-counterparty reports just won't aggregate it under a named
+    // vendor/client.
     const d = baseData();
     d.header.contact_ruc = null;
-    const r = validatePaymentSubmissionData(d);
-    expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.path === "header.contact_ruc")).toBe(true);
+    expect(validatePaymentSubmissionData(d).valid).toBe(true);
   });
 
-  it("rejects RUC with wrong length", () => {
+  it("rejects RUC with wrong length when supplied", () => {
     const d = baseData();
     d.header.contact_ruc = "12345";
     const r = validatePaymentSubmissionData(d);

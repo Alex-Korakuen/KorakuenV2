@@ -17,18 +17,26 @@ export async function GET() {
   // line_amount, line_type, project_code, invoice_number, cost_category,
   // line_notes
   //
-  // partner_ruc is optional. Blank = Korakuen (the default). Fill it in only
-  // when the payment was actually made by one of the other consortium
-  // partners — this feeds the settlement formula.
+  // Optional fields:
+  //   - contact_ruc: blank = unknown counterparty (informal vendor, cash
+  //     purchase, ambiguous deposit). The payment still records in cash flow,
+  //     project cost, and settlement — it just doesn't aggregate under a
+  //     named client/vendor in the by-counterparty reports.
+  //   - partner_ruc: blank = Korakuen. Fill in only when one of the other
+  //     consortium partners actually moved the money — feeds settlement.
+  //   - exchange_rate: blank = auto-resolve from BCRP rate for payment_date
+  //     (USD only; ignored for PEN).
   const examples = [
-    // P001 — single-line inbound payment, Korakuen collects (blank partner_ruc)
+    // P001 — single-line inbound, Korakuen collects from a known client
     `P001,2026-04-02,inbound,BCP Soles,PEN,,OP-445511,false,20512345678,,Cobro cliente,11800.00,invoice,PRJ-2026-01,F001-00045,,`,
-    // P002 — three-line outbound payment, Korakuen pays (blank partner_ruc)
+    // P002 — three-line outbound, Korakuen pays a known vendor with fee + general cost
     `P002,2026-04-03,outbound,BCP Soles,PEN,,TRF-998877,false,20498765432,,Pago proveedor,5900.00,invoice,PRJ-2026-01,F001-00089,,`,
     `P002,2026-04-03,outbound,BCP Soles,PEN,,TRF-998877,false,20498765432,,Pago proveedor,12.50,bank_fee,,,,comisión de transferencia`,
     `P002,2026-04-03,outbound,BCP Soles,PEN,,TRF-998877,false,20498765432,,Pago proveedor,100.00,general,PRJ-2026-01,,Materiales,materiales varios`,
-    // P003 — outbound payment made out of pocket by Partner B (partner_ruc filled)
+    // P003 — outbound paid out of pocket by Partner B (partner_ruc filled in)
     `P003,2026-04-04,outbound,BCP Soles,PEN,,TRF-112233,false,20499988877,20111222333,Pago materiales (Partner B),2500.00,general,PRJ-2026-01,,Materiales,pagó Partner B`,
+    // P004 — outbound cash purchase from an informal vendor (contact_ruc BLANK)
+    `P004,2026-04-05,outbound,BCP Soles,PEN,,RET-445566,false,,,Compra materiales informal,450.00,general,PRJ-2026-01,,Materiales,Don Pedro ferretería`,
   ];
   const body = [header, ...examples].join("\n") + "\n";
 

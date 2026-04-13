@@ -297,7 +297,8 @@ export function buildSubmissionFromGroup(
  * passes.
  *
  * Rules enforced:
- * - Required header fields (date, direction, bank account, currency, contact)
+ * - Required header fields (date, direction, bank account, currency)
+ * - contact_ruc is OPTIONAL (cash-basis: informal vendors may have no RUC)
  * - direction must be inbound|outbound
  * - currency must be PEN|USD
  * - exchange_rate, if supplied, must be > 0; blank is allowed (USD payments
@@ -336,15 +337,17 @@ export function validatePaymentSubmissionData(
       message: 'Moneda debe ser "PEN" o "USD"',
     });
   }
-  if (!h.contact_ruc) {
+  // contact_ruc is optional — cash-basis philosophy means we must record
+  // that money moved even when the counterparty is unknown (informal
+  // vendors, cash purchases, ambiguous bank deposits). When blank, the
+  // payment stores contact_id = null and just doesn't show up in the
+  // by-vendor/by-client groupings — everything else (cash flow, project
+  // attribution, settlement) still works. If supplied, the format must be
+  // valid so downstream SUNAT lookup can resolve it.
+  if (h.contact_ruc && !/^\d{8}$|^\d{11}$/.test(h.contact_ruc)) {
     errors.push({
       path: "header.contact_ruc",
-      message: "RUC del contacto es requerido",
-    });
-  } else if (!/^\d{8}$|^\d{11}$/.test(h.contact_ruc)) {
-    errors.push({
-      path: "header.contact_ruc",
-      message: "El RUC debe tener 8 u 11 dígitos",
+      message: "El RUC debe tener 8 u 11 dígitos (o dejar vacío si no se conoce)",
     });
   }
 

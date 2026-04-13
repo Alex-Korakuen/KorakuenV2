@@ -944,13 +944,14 @@ async function buildCreatePaymentInputFromSubmission(
   const h = extracted.header;
 
   // These should have been caught by validateApproveSubmission already,
-  // but the type system wants explicit narrowing.
+  // but the type system wants explicit narrowing. contact_id is NOT in the
+  // required list — informal / unknown counterparties are a first-class
+  // case (see validator rule: contact_ruc is optional).
   if (
     !h.payment_date ||
     !h.direction ||
     !h.bank_account_id ||
-    !h.currency ||
-    !h.contact_id
+    !h.currency
   ) {
     return failure("VALIDATION_ERROR", "Submission incompleta", {
       build: "Missing required header fields after validation",
