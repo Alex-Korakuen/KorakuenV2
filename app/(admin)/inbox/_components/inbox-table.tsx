@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -9,18 +9,40 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatPEN, formatDate } from "@/lib/format";
-import { approveSubmission, rejectSubmission } from "@/app/actions/inbox";
+import {
+  approveSubmission,
+  rejectSubmission,
+  updateSubmission,
+  addSubmissionLine,
+  deleteSubmissionLine,
+} from "@/app/actions/inbox";
+import { SUBMISSION_STATUS } from "@/lib/types";
 import type {
   SubmissionRow,
   PaymentSubmissionExtractedData,
   PaymentSubmissionLine,
+  BankAccountRow,
+  ProjectRow,
+  CostCategoryRow,
 } from "@/lib/types";
+import type { SubmissionPatch } from "@/lib/validators/inbox";
+import { EditableCell } from "./editable-cell";
+import type { ComboboxOption } from "./editors/combobox-editor";
+import {
+  HEADER_FIELD_EDITORS,
+  LINE_FIELD_EDITORS,
+} from "./editors/field-config";
 
 type Props = {
   submissions: SubmissionRow[];
+  bankAccounts: BankAccountRow[];
+  projects: ProjectRow[];
+  costCategories: CostCategoryRow[];
 };
 
 function isPaymentData(
@@ -52,10 +74,57 @@ function lineTypePillClasses(t: PaymentSubmissionLine["line_type"]): string {
   return "bg-stone-100 text-stone-600 border border-stone-200";
 }
 
-export function InboxTable({ submissions }: Props) {
+export function InboxTable({
+  submissions,
+  bankAccounts,
+  projects,
+  costCategories,
+}: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [activeEditId, setActiveEditId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
+
+  // Pre-compute combobox options shared across rows.
+  const bankOptions = useMemo<ComboboxOption[]>(
+    () =>
+      bankAccounts.map((b) => ({
+        id: b.id,
+        label: b.name,
+        value: b.name,
+        hint: `${b.bank_name} · ${b.currency}${
+          b.account_number ? ` · ···· ${b.account_number.slice(-4)}` : ""
+        }`,
+      })),
+    [bankAccounts],
+  );
+  const projectOptions = useMemo<ComboboxOption[]>(
+    () =>
+      projects
+        .filter((p) => p.code != null)
+        .map((p) => ({
+          id: p.id,
+          label: p.code ?? "",
+          value: p.code ?? "",
+          hint: p.name,
+        })),
+    [projects],
+  );
+  const costCategoryOptions = useMemo<ComboboxOption[]>(
+    () => {
+      const byId = new Map(costCategories.map((c) => [c.id, c]));
+      return costCategories.map((c) => {
+        const parent = c.parent_id ? byId.get(c.parent_id) : null;
+        return {
+          id: c.id,
+          label: c.name,
+          value: c.name,
+          hint: parent?.name,
+        };
+      });
+    },
+    [costCategories],
+  );
 
   function toggle(id: string) {
     setExpanded((prev) => {
@@ -71,11 +140,10 @@ export function InboxTable({ submissions }: Props) {
       const result = await approveSubmission(id);
       if (result.success) {
         toast.success("Pago creado");
-        router.refresh();
       } else {
         toast.error(result.error.message);
-        router.refresh();
       }
+      router.refresh();
     });
   }
 
@@ -84,10 +152,37 @@ export function InboxTable({ submissions }: Props) {
       const result = await rejectSubmission(id);
       if (result.success) {
         toast.success("Submission rechazada");
+      } else {
+        toast.error(result.error.message);
+      }
+      router.refresh();
+    });
+  }
+
+  function handlePatch(submissionId: string, patch: SubmissionPatch) {
+    startTransition(async () => {
+      const result = await updateSubmission(submissionId, patch);
+      if (result.success) {
         router.refresh();
       } else {
         toast.error(result.error.message);
       }
+    });
+  }
+
+  function handleAddLine(submissionId: string) {
+    startTransition(async () => {
+      const result = await addSubmissionLine(submissionId);
+      if (result.success) router.refresh();
+      else toast.error(result.error.message);
+    });
+  }
+
+  function handleDeleteLine(submissionId: string, index: number) {
+    startTransition(async () => {
+      const result = await deleteSubmissionLine(submissionId, index);
+      if (result.success) router.refresh();
+      else toast.error(result.error.message);
     });
   }
 
@@ -150,30 +245,34 @@ export function InboxTable({ submissions }: Props) {
             if (!data) {
               return (
                 <tr key={s.id} className="border-t border-border">
-                  <td colSpan={11} className="px-3 py-4 text-center text-xs text-muted-foreground">
+                  <td
+                    colSpan={11}
+                    className="px-3 py-4 text-center text-xs text-muted-foreground"
+                  >
                     Submission desconocido (source_type={s.source_type})
                   </td>
                 </tr>
               );
             }
-            const isOpen = expanded.has(s.id);
-            const total = totalLines(data.lines);
-            const h = data.header;
-            const hasError = !data.validation.valid;
-
             return (
               <PaymentGroupRow
                 key={s.id}
                 submission={s}
                 data={data}
-                total={total}
-                isOpen={isOpen}
-                hasError={hasError}
+                isOpen={expanded.has(s.id)}
+                activeEditId={activeEditId}
+                onBeginEdit={setActiveEditId}
+                onFinishEdit={() => setActiveEditId(null)}
                 onToggle={() => toggle(s.id)}
                 onApprove={() => handleApprove(s.id)}
                 onReject={() => handleReject(s.id)}
+                onPatch={(patch) => handlePatch(s.id, patch)}
+                onAddLine={() => handleAddLine(s.id)}
+                onDeleteLine={(i) => handleDeleteLine(s.id, i)}
                 pending={pending}
-                headerRaw={h}
+                bankOptions={bankOptions}
+                projectOptions={projectOptions}
+                costCategoryOptions={costCategoryOptions}
               />
             );
           })}
@@ -183,54 +282,85 @@ export function InboxTable({ submissions }: Props) {
   );
 }
 
-function PaymentGroupRow({
-  submission,
-  data,
-  total,
-  isOpen,
-  hasError,
-  onToggle,
-  onApprove,
-  onReject,
-  pending,
-  headerRaw,
-}: {
+// ---------------------------------------------------------------------------
+// PaymentGroupRow
+// ---------------------------------------------------------------------------
+
+type PaymentGroupRowProps = {
   submission: SubmissionRow;
   data: PaymentSubmissionExtractedData;
-  total: number;
   isOpen: boolean;
-  hasError: boolean;
+  activeEditId: string | null;
+  onBeginEdit: (cellId: string) => void;
+  onFinishEdit: () => void;
   onToggle: () => void;
   onApprove: () => void;
   onReject: () => void;
+  onPatch: (patch: SubmissionPatch) => void;
+  onAddLine: () => void;
+  onDeleteLine: (index: number) => void;
   pending: boolean;
-  headerRaw: PaymentSubmissionExtractedData["header"];
-}) {
+  bankOptions: ComboboxOption[];
+  projectOptions: ComboboxOption[];
+  costCategoryOptions: ComboboxOption[];
+};
+
+function PaymentGroupRow({
+  submission,
+  data,
+  isOpen,
+  activeEditId,
+  onBeginEdit,
+  onFinishEdit,
+  onToggle,
+  onApprove,
+  onReject,
+  onPatch,
+  onAddLine,
+  onDeleteLine,
+  pending,
+  bankOptions,
+  projectOptions,
+  costCategoryOptions,
+}: PaymentGroupRowProps) {
+  const header = data.header;
+  const hasError = !data.validation.valid;
+  const total = totalLines(data.lines);
+  const readOnly = submission.review_status !== SUBMISSION_STATUS.pending;
+  const rowTint = hasError
+    ? "bg-amber-50/40 hover:bg-amber-50/60"
+    : "hover:bg-primary/[0.03]";
   const directionLabel =
-    headerRaw.direction === "inbound"
+    header.direction === "inbound"
       ? "Entrada"
-      : headerRaw.direction === "outbound"
-        ? headerRaw.is_detraction
+      : header.direction === "outbound"
+        ? header.is_detraction
           ? "Salida · detr"
           : "Salida"
         : "—";
   const directionColor =
-    headerRaw.direction === "inbound" ? "text-emerald-700" : "text-amber-700";
-  const amountColor =
-    headerRaw.direction === "inbound" ? "text-emerald-700" : "text-amber-700";
-  const amountPrefix = headerRaw.direction === "inbound" ? "+ " : "− ";
+    header.direction === "inbound" ? "text-emerald-700" : "text-amber-700";
+  const amountColor = directionColor;
+  const amountPrefix = header.direction === "inbound" ? "+ " : "− ";
   const lineCountColor = hasError
     ? "text-amber-700 font-medium"
     : "text-muted-foreground";
 
-  const rowTint = hasError
-    ? "bg-amber-50/40 hover:bg-amber-50/60"
-    : "hover:bg-primary/[0.03]";
+  const cellId = (suffix: string) => `${submission.id}:${suffix}`;
+  const editProps = {
+    activeEditId,
+    onBeginEdit,
+    onFinishEdit,
+    readOnly,
+  };
 
   return (
     <>
       <tr
-        onClick={onToggle}
+        onClick={() => {
+          if (activeEditId) return; // don't collapse while editing
+          onToggle();
+        }}
         className={`cursor-pointer border-t border-border transition-colors ${rowTint} ${isOpen ? "bg-primary/[0.04]" : ""}`}
       >
         <td className="px-3 py-2.5 text-center">
@@ -254,34 +384,125 @@ function PaymentGroupRow({
             </span>
           )}
         </td>
-        <td className="px-3 py-2.5 text-xs text-muted-foreground">
-          {headerRaw.payment_date
-            ? formatDate(headerRaw.payment_date)
-            : "—"}
+        {/* Fecha */}
+        <td className="px-3 py-2.5">
+          <EditableCell
+            {...editProps}
+            cellId={cellId("header.payment_date")}
+            config={HEADER_FIELD_EDITORS.payment_date}
+            value={header.payment_date}
+            display={
+              <span className="text-xs text-muted-foreground">
+                {header.payment_date ? formatDate(header.payment_date) : "—"}
+              </span>
+            }
+            onSave={(next) =>
+              onPatch({
+                kind: "set_header",
+                field: "payment_date",
+                value: next,
+              })
+            }
+          />
         </td>
+        {/* Dirección — locked, not editable */}
         <td className="px-3 py-2.5">
           <span className={`text-xs font-medium ${directionColor}`}>
             {directionLabel}
           </span>
         </td>
+        {/* Cuenta */}
         <td className="px-3 py-2.5">
-          <p className="text-foreground">{headerRaw.bank_account_label ?? "—"}</p>
+          <EditableCell
+            {...editProps}
+            cellId={cellId("header.bank_account_label")}
+            config={HEADER_FIELD_EDITORS.bank_account_label}
+            value={header.bank_account_label}
+            comboboxOptions={bankOptions}
+            display={
+              <p className="text-foreground">
+                {header.bank_account_label ?? "—"}
+              </p>
+            }
+            onSave={(next) =>
+              onPatch({
+                kind: "set_header",
+                field: "bank_account_label",
+                value: next,
+              })
+            }
+          />
         </td>
+        {/* Contacto (RUC) */}
         <td className="px-3 py-2.5">
-          <p className="truncate text-foreground">
-            {headerRaw.contact_ruc ?? "—"}
-          </p>
+          <EditableCell
+            {...editProps}
+            cellId={cellId("header.contact_ruc")}
+            config={HEADER_FIELD_EDITORS.contact_ruc}
+            value={header.contact_ruc}
+            display={
+              <p className="truncate font-mono text-xs text-foreground">
+                {header.contact_ruc ?? "—"}
+              </p>
+            }
+            onSave={(next) =>
+              onPatch({
+                kind: "set_header",
+                field: "contact_ruc",
+                value: next,
+              })
+            }
+          />
         </td>
-        <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">
-          {headerRaw.project_code ?? "—"}
+        {/* Proyecto */}
+        <td className="px-3 py-2.5">
+          <EditableCell
+            {...editProps}
+            cellId={cellId("header.project_code")}
+            config={HEADER_FIELD_EDITORS.project_code}
+            value={header.project_code}
+            comboboxOptions={projectOptions}
+            display={
+              <span className="font-mono text-xs text-muted-foreground">
+                {header.project_code ?? "—"}
+              </span>
+            }
+            onSave={(next) =>
+              onPatch({
+                kind: "set_header",
+                field: "project_code",
+                value: next,
+              })
+            }
+          />
         </td>
-        <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">
-          {headerRaw.bank_reference ?? "—"}
+        {/* Ref */}
+        <td className="px-3 py-2.5">
+          <EditableCell
+            {...editProps}
+            cellId={cellId("header.bank_reference")}
+            config={HEADER_FIELD_EDITORS.bank_reference}
+            value={header.bank_reference}
+            display={
+              <span className="font-mono text-xs text-muted-foreground">
+                {header.bank_reference ?? "—"}
+              </span>
+            }
+            onSave={(next) =>
+              onPatch({
+                kind: "set_header",
+                field: "bank_reference",
+                value: next,
+              })
+            }
+          />
         </td>
         <td className={`px-3 py-2.5 text-center text-xs ${lineCountColor}`}>
           {data.lines.length}
         </td>
-        <td className={`px-3 py-2.5 text-right font-medium tabular-nums ${amountColor}`}>
+        <td
+          className={`px-3 py-2.5 text-right font-medium tabular-nums ${amountColor}`}
+        >
           {amountPrefix}
           {formatPEN(total)}
         </td>
@@ -293,14 +514,14 @@ function PaymentGroupRow({
             <Button
               size="sm"
               variant="outline"
-              disabled={pending}
+              disabled={pending || activeEditId !== null || readOnly}
               onClick={onReject}
             >
               Rechazar
             </Button>
             <Button
               size="sm"
-              disabled={pending || hasError}
+              disabled={pending || hasError || activeEditId !== null || readOnly}
               onClick={onApprove}
             >
               Aprobar
@@ -310,19 +531,52 @@ function PaymentGroupRow({
       </tr>
 
       {isOpen ? (
-        <DetailPanel data={data} submissionId={submission.id} />
+        <DetailPanel
+          data={data}
+          submissionId={submission.id}
+          activeEditId={activeEditId}
+          onBeginEdit={onBeginEdit}
+          onFinishEdit={onFinishEdit}
+          onPatch={onPatch}
+          onAddLine={onAddLine}
+          onDeleteLine={onDeleteLine}
+          readOnly={readOnly}
+          costCategoryOptions={costCategoryOptions}
+        />
       ) : null}
     </>
   );
 }
 
+// ---------------------------------------------------------------------------
+// DetailPanel — lines sub-table
+// ---------------------------------------------------------------------------
+
 function DetailPanel({
   data,
   submissionId,
+  activeEditId,
+  onBeginEdit,
+  onFinishEdit,
+  onPatch,
+  onAddLine,
+  onDeleteLine,
+  readOnly,
+  costCategoryOptions,
 }: {
   data: PaymentSubmissionExtractedData;
   submissionId: string;
+  activeEditId: string | null;
+  onBeginEdit: (cellId: string) => void;
+  onFinishEdit: () => void;
+  onPatch: (patch: SubmissionPatch) => void;
+  onAddLine: () => void;
+  onDeleteLine: (index: number) => void;
+  readOnly: boolean;
+  costCategoryOptions: ComboboxOption[];
 }) {
+  const editProps = { activeEditId, onBeginEdit, onFinishEdit, readOnly };
+
   return (
     <tr>
       <td colSpan={11} className="px-0 py-0">
@@ -334,6 +588,7 @@ function DetailPanel({
                   e.path.startsWith(`lines[${i}]`),
                 );
                 const hasLineError = lineErrors.length > 0;
+                const cid = (f: string) => `${submissionId}:lines[${i}].${f}`;
                 return (
                   <tr
                     key={`${submissionId}-${i}`}
@@ -347,33 +602,139 @@ function DetailPanel({
                     <td className="px-3 py-2 text-[11px] uppercase tracking-wider text-muted-foreground">
                       línea {i + 1}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-foreground">
-                      {typeof line.amount === "number"
-                        ? line.amount.toFixed(2)
-                        : "—"}
+                    {/* Amount */}
+                    <td className="px-3 py-2 text-right">
+                      <EditableCell
+                        {...editProps}
+                        cellId={cid("amount")}
+                        config={LINE_FIELD_EDITORS.amount}
+                        value={line.amount}
+                        display={
+                          <span className="tabular-nums text-foreground">
+                            {typeof line.amount === "number"
+                              ? line.amount.toFixed(2)
+                              : "—"}
+                          </span>
+                        }
+                        onSave={(next) =>
+                          onPatch({
+                            kind: "set_line",
+                            index: i,
+                            field: "amount",
+                            value: next,
+                          })
+                        }
+                      />
                     </td>
+                    {/* Line type */}
                     <td className="px-3 py-2">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${lineTypePillClasses(line.line_type)}`}
-                      >
-                        {line.line_type ?? "—"}
-                      </span>
+                      <EditableCell
+                        {...editProps}
+                        cellId={cid("line_type")}
+                        config={LINE_FIELD_EDITORS.line_type}
+                        value={line.line_type}
+                        display={
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${lineTypePillClasses(line.line_type)}`}
+                          >
+                            {line.line_type ?? "—"}
+                          </span>
+                        }
+                        onSave={(next) =>
+                          onPatch({
+                            kind: "set_line",
+                            index: i,
+                            field: "line_type",
+                            value: next,
+                          })
+                        }
+                      />
                     </td>
-                    <td className="px-3 py-2 text-xs text-muted-foreground">
-                      {line.notes ?? "—"}
+                    {/* Notes */}
+                    <td className="px-3 py-2">
+                      <EditableCell
+                        {...editProps}
+                        cellId={cid("notes")}
+                        config={LINE_FIELD_EDITORS.notes}
+                        value={line.notes}
+                        display={
+                          <span className="text-xs text-muted-foreground">
+                            {line.notes ?? "—"}
+                          </span>
+                        }
+                        onSave={(next) =>
+                          onPatch({
+                            kind: "set_line",
+                            index: i,
+                            field: "notes",
+                            value: next,
+                          })
+                        }
+                      />
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
-                      {line.cost_category_label ?? "—"}
+                    {/* Cost category */}
+                    <td className="px-3 py-2">
+                      <EditableCell
+                        {...editProps}
+                        cellId={cid("cost_category_label")}
+                        config={LINE_FIELD_EDITORS.cost_category_label}
+                        value={line.cost_category_label}
+                        comboboxOptions={costCategoryOptions}
+                        display={
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {line.cost_category_label ?? "—"}
+                          </span>
+                        }
+                        onSave={(next) =>
+                          onPatch({
+                            kind: "set_line",
+                            index: i,
+                            field: "cost_category_label",
+                            value: next,
+                          })
+                        }
+                      />
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
-                      {line.invoice_number_hint ?? "—"}
+                    {/* Invoice number hint */}
+                    <td className="px-3 py-2">
+                      <EditableCell
+                        {...editProps}
+                        cellId={cid("invoice_number_hint")}
+                        config={LINE_FIELD_EDITORS.invoice_number_hint}
+                        value={line.invoice_number_hint}
+                        display={
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {line.invoice_number_hint ?? "—"}
+                          </span>
+                        }
+                        onSave={(next) =>
+                          onPatch({
+                            kind: "set_line",
+                            index: i,
+                            field: "invoice_number_hint",
+                            value: next,
+                          })
+                        }
+                      />
                     </td>
-                    <td colSpan={3} className="px-3 py-2 text-xs text-muted-foreground">
-                      {hasLineError
-                        ? lineErrors[0].message
-                        : null}
+                    <td
+                      colSpan={3}
+                      className="px-3 py-2 text-xs text-muted-foreground"
+                    >
+                      {hasLineError ? lineErrors[0].message : null}
                     </td>
-                    <td className="px-3 py-2" />
+                    <td className="px-3 py-2 text-right">
+                      {!readOnly && data.lines.length > 1 ? (
+                        <button
+                          type="button"
+                          onClick={() => onDeleteLine(i)}
+                          className="text-muted-foreground hover:text-red-600"
+                          title="Eliminar línea"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      ) : null}
+                    </td>
                   </tr>
                 );
               })}
@@ -385,13 +746,24 @@ function DetailPanel({
                 <td className="px-3 py-2 text-right tabular-nums font-medium text-foreground">
                   {totalLines(data.lines).toFixed(2)}
                 </td>
-                <td colSpan={8} />
+                <td colSpan={7} />
+                <td className="px-3 py-2 text-right">
+                  {!readOnly ? (
+                    <button
+                      type="button"
+                      onClick={onAddLine}
+                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                    >
+                      <Plus className="h-3 w-3" /> Agregar línea
+                    </button>
+                  ) : null}
+                </td>
               </tr>
             </tbody>
           </table>
 
-          {/* Header-level errors (not tied to a specific line) */}
-          {data.validation.errors.filter((e) => !e.path.startsWith("lines[")).length > 0 ? (
+          {data.validation.errors.filter((e) => !e.path.startsWith("lines["))
+            .length > 0 ? (
             <div className="border-t border-amber-200 bg-amber-50 px-4 py-2.5">
               <ul className="space-y-1">
                 {data.validation.errors

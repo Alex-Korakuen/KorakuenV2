@@ -38,6 +38,10 @@ import {
   validateApproveSubmission,
   validateRejectSubmission,
   validatePaymentSubmissionData,
+  resolveHeaderLabelsToIds,
+  applyPatchToExtractedData,
+  type ResolutionRefs,
+  type SubmissionPatch,
 } from "@/lib/validators/inbox";
 import { findOrCreateContactByRuc } from "./contacts";
 import { createPayment } from "./payments";
@@ -131,46 +135,24 @@ export async function createInboxBatch(
 
   // 2. Pre-load reference data once to avoid N round-trips.
   const supabase = await createServerClient();
-  const [bankAccountsResult, projectsResult] = await Promise.all([
-    supabase
-      .from("bank_accounts")
-      .select("*")
-      .is("deleted_at", null)
-      .eq("is_active", true),
-    supabase.from("projects").select("*").is("deleted_at", null),
-  ]);
-
-  if (bankAccountsResult.error) {
-    return failure(
-      "NOT_FOUND",
-      `No se pudieron cargar cuentas bancarias: ${bankAccountsResult.error.message}`,
-    );
-  }
-  if (projectsResult.error) {
-    return failure(
-      "NOT_FOUND",
-      `No se pudieron cargar proyectos: ${projectsResult.error.message}`,
-    );
-  }
-
-  const bankAccounts = (bankAccountsResult.data ?? []) as BankAccountRow[];
-  const projects = (projectsResult.data ?? []) as ProjectRow[];
+  const refsResult = await loadResolutionRefs(supabase, {
+    includeContacts: true,
+  });
+  if (!refsResult.success) return refsResult;
+  const refs = refsResult.data;
 
   // 3. Build one submission per group, resolving FKs and auto-creating
-  //    contacts as needed. Contact cache so the same RUC used across
-  //    groups only hits SUNAT once.
-  const contactCache = new Map<string, ContactRow>();
+  //    contacts as needed. The refs map is shared across groups so the
+  //    same RUC used twice only hits SUNAT once.
   const submissions: Array<{
     extractedData: PaymentSubmissionExtractedData;
   }> = [];
 
   for (const [groupId, rows] of groups.entries()) {
     const extracted = buildSubmissionFromGroup(groupId, rows);
-    await resolveSubmissionForeignKeys(extracted, {
-      bankAccounts,
-      projects,
-      contactCache,
-    });
+    const fkErrors = await resolveHeaderAndAutoCreateContact(extracted, refs);
+    extracted.validation.errors.push(...fkErrors);
+    extracted.validation.valid = extracted.validation.errors.length === 0;
     submissions.push({ extractedData: extracted });
   }
 
@@ -212,95 +194,105 @@ export async function createInboxBatch(
 }
 
 // ---------------------------------------------------------------------------
-// resolveSubmissionForeignKeys (internal)
+// Reference data loading (shared by create and update paths)
 // ---------------------------------------------------------------------------
 
 /**
- * Mutates the passed extracted_data in place, filling in bank_account_id,
- * project_id, contact_id (and optionally auto-creating contacts). Adds
- * field-level errors to `extracted_data.validation.errors` when a label
- * can't be resolved.
+ * Load the preloaded reference bags used by the pure resolver. Single
+ * round-trip cost, reusable across many submissions in the same request.
  */
-async function resolveSubmissionForeignKeys(
-  extracted: PaymentSubmissionExtractedData,
-  refs: {
-    bankAccounts: BankAccountRow[];
-    projects: ProjectRow[];
-    contactCache: Map<string, ContactRow>;
-  },
-): Promise<void> {
-  const h = extracted.header;
-  const errors: SubmissionFieldError[] = [];
+async function loadResolutionRefs(
+  supabase: Awaited<ReturnType<typeof createServerClient>>,
+  opts: { includeContacts: boolean },
+): Promise<ValidationResult<ResolutionRefs>> {
+  const [bankResult, projectResult, contactResult] = await Promise.all([
+    supabase
+      .from("bank_accounts")
+      .select("id, name, account_number")
+      .is("deleted_at", null)
+      .eq("is_active", true),
+    supabase.from("projects").select("id, code").is("deleted_at", null),
+    opts.includeContacts
+      ? supabase
+          .from("contacts")
+          .select("id, ruc")
+          .is("deleted_at", null)
+          .not("ruc", "is", null)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
 
-  // Bank account: exact match on name, then on last-4 of account_number.
-  if (h.bank_account_label) {
-    const label = h.bank_account_label.trim();
-    const byName = refs.bankAccounts.find(
-      (b) => b.name.toLowerCase() === label.toLowerCase(),
+  if (bankResult.error) {
+    return failure(
+      "NOT_FOUND",
+      `No se pudieron cargar cuentas bancarias: ${bankResult.error.message}`,
     );
-    if (byName) {
-      h.bank_account_id = byName.id;
-    } else {
-      const last4 = label.replace(/\D/g, "").slice(-4);
-      const byLast4 =
-        last4.length === 4
-          ? refs.bankAccounts.find((b) =>
-              (b.account_number ?? "").endsWith(last4),
-            )
-          : undefined;
-      if (byLast4) {
-        h.bank_account_id = byLast4.id;
-      } else {
-        errors.push({
-          path: "header.bank_account",
-          message: `Cuenta bancaria "${h.bank_account_label}" no encontrada`,
-        });
-      }
-    }
+  }
+  if (projectResult.error) {
+    return failure(
+      "NOT_FOUND",
+      `No se pudieron cargar proyectos: ${projectResult.error.message}`,
+    );
+  }
+  if (contactResult.error) {
+    return failure(
+      "NOT_FOUND",
+      `No se pudieron cargar contactos: ${contactResult.error.message}`,
+    );
   }
 
-  // Project (optional): match by code
-  if (h.project_code) {
-    const project = refs.projects.find(
-      (p) =>
-        p.code != null &&
-        p.code.toLowerCase() === h.project_code!.toLowerCase(),
-    );
-    if (project) {
-      h.project_id = project.id;
+  const contactsByRuc = new Map<string, { id: string; ruc: string | null }>();
+  for (const c of (contactResult.data ?? []) as Array<{
+    id: string;
+    ruc: string | null;
+  }>) {
+    if (c.ruc) contactsByRuc.set(c.ruc, c);
+  }
+
+  return success({
+    bankAccounts: (bankResult.data ?? []) as Array<{
+      id: string;
+      name: string;
+      account_number: string | null;
+    }>,
+    projects: (projectResult.data ?? []) as Array<{
+      id: string;
+      code: string | null;
+    }>,
+    contactsByRuc,
+  });
+}
+
+/**
+ * Apply the pure header resolver, then handle the one DB side effect
+ * (SUNAT auto-create for unknown contacts). Pushes any unresolved-label
+ * errors onto the passed errors array.
+ */
+async function resolveHeaderAndAutoCreateContact(
+  extracted: PaymentSubmissionExtractedData,
+  refs: ResolutionRefs,
+): Promise<SubmissionFieldError[]> {
+  const errors = resolveHeaderLabelsToIds(extracted.header, refs);
+  const h = extracted.header;
+
+  // Contact: if the RUC didn't match any preloaded contact, try SUNAT.
+  const contactUnresolved =
+    h.contact_ruc && h.direction && h.contact_id == null;
+  if (contactUnresolved) {
+    const r = await findOrCreateContactByRuc(h.contact_ruc!, h.direction!);
+    if (r.success) {
+      h.contact_id = r.data.id;
+      if (r.data.ruc) {
+        refs.contactsByRuc.set(r.data.ruc, { id: r.data.id, ruc: r.data.ruc });
+      }
     } else {
       errors.push({
-        path: "header.project_code",
-        message: `Proyecto "${h.project_code}" no encontrado`,
+        path: "header.contact_ruc",
+        message: r.error.message,
       });
     }
   }
 
-  // Contact: local lookup → SUNAT auto-create fallback.
-  if (h.contact_ruc && h.direction) {
-    const cached = refs.contactCache.get(h.contact_ruc);
-    if (cached) {
-      h.contact_id = cached.id;
-    } else {
-      const r = await findOrCreateContactByRuc(h.contact_ruc, h.direction);
-      if (r.success) {
-        h.contact_id = r.data.id;
-        refs.contactCache.set(h.contact_ruc, r.data);
-      } else {
-        errors.push({
-          path: "header.contact_ruc",
-          message: r.error.message,
-        });
-      }
-    }
-  }
-
-  // Lines — invoice_number_hint stays as hint; no FK resolution here.
-  // It'll be resolved inline by the editor or at approve time.
-
-  // Merge any new errors into the existing validation report.
-  extracted.validation.errors.push(...errors);
-  extracted.validation.valid = extracted.validation.errors.length === 0;
+  return errors;
 }
 
 // ---------------------------------------------------------------------------
@@ -835,4 +827,133 @@ async function persistValidationErrors(
     .from("submissions")
     .update({ extracted_data: nextData, updated_at: nowISO() })
     .eq("id", submissionId);
+}
+
+// ---------------------------------------------------------------------------
+// updateSubmission (Phase E — inline editing)
+// ---------------------------------------------------------------------------
+
+/**
+ * Apply a single patch to a pending submission's extracted_data. Steps:
+ *   1. Load + gate (pending, source_type=payment, kind=payment)
+ *   2. Pure patch application
+ *   3. Re-resolve FKs if the patch changed a label (bank/project/contact)
+ *   4. Fresh validation pass (replaces the old validation report — edits
+ *      are expected to clear errors, not merge with them)
+ *   5. Persist and return the fresh submission
+ *
+ * The SUNAT auto-create path is triggered automatically when the patch
+ * sets `contact_ruc` to a new RUC not in the preloaded contact map. The
+ * client never has to call SUNAT directly.
+ */
+export async function updateSubmission(
+  submissionId: string,
+  patch: SubmissionPatch,
+): Promise<ValidationResult<SubmissionRow>> {
+  await requireAdmin();
+  const supabase = await createServerClient();
+
+  const submission = await fetchActiveById<SubmissionRow>(
+    supabase,
+    "submissions",
+    submissionId,
+  );
+  if (!submission) {
+    return failure("NOT_FOUND", "Submission no encontrada");
+  }
+  if (submission.review_status !== SUBMISSION_STATUS.pending) {
+    return failure(
+      "CONFLICT",
+      "Solo submissions pendientes pueden editarse",
+    );
+  }
+  if (submission.source_type !== SUBMISSION_SOURCE_TYPE.payment) {
+    return failure(
+      "VALIDATION_ERROR",
+      "Esta acción solo aplica a submissions de pago",
+    );
+  }
+
+  const current = submission.extracted_data as PaymentSubmissionExtractedData;
+  if (!current || current.kind !== "payment") {
+    return failure(
+      "VALIDATION_ERROR",
+      "La submission no contiene datos de pago válidos",
+    );
+  }
+
+  // 1. Apply the patch purely
+  const patched = applyPatchToExtractedData(current, patch);
+  if (!patched.success) {
+    return patched as ValidationResult<SubmissionRow>;
+  }
+  const next = patched.data;
+
+  // 2. Re-resolve FKs only if the patch touched a label field or the
+  //    extracted data has any unresolved labels (addLine/deleteLine don't
+  //    change labels but we still refresh so nothing goes stale).
+  const touchesLabel =
+    patch.kind === "set_header" &&
+    (patch.field === "bank_account_label" ||
+      patch.field === "project_code" ||
+      patch.field === "contact_ruc");
+
+  if (touchesLabel) {
+    const refsResult = await loadResolutionRefs(supabase, {
+      includeContacts: true,
+    });
+    if (!refsResult.success) return refsResult as ValidationResult<SubmissionRow>;
+    const fkErrors = await resolveHeaderAndAutoCreateContact(
+      next,
+      refsResult.data,
+    );
+    // FK errors live in the validation report alongside semantic errors.
+    next.validation.errors.push(...fkErrors);
+  }
+
+  // 3. Fresh semantic validation pass (REPLACE, not merge)
+  const report = validatePaymentSubmissionData(next);
+  next.validation = {
+    valid: report.valid && next.validation.errors.length === 0,
+    errors: [...next.validation.errors, ...report.errors],
+  };
+  next.validation.valid = next.validation.errors.length === 0;
+
+  // 4. Persist
+  const { data: updated, error } = await supabase
+    .from("submissions")
+    .update({ extracted_data: next, updated_at: nowISO() })
+    .eq("id", submissionId)
+    .select()
+    .single();
+
+  if (error || !updated) {
+    return failure(
+      "VALIDATION_ERROR",
+      error?.message ?? "No se pudo actualizar la submission",
+    );
+  }
+
+  return success(updated as SubmissionRow);
+}
+
+/**
+ * Append a blank line to a pending submission. Thin wrapper around
+ * updateSubmission for ergonomics.
+ */
+export async function addSubmissionLine(
+  submissionId: string,
+): Promise<ValidationResult<SubmissionRow>> {
+  return updateSubmission(submissionId, { kind: "add_line" });
+}
+
+/**
+ * Delete a line from a pending submission. Last line cannot be deleted;
+ * the pure patch handler rejects that.
+ */
+export async function deleteSubmissionLine(
+  submissionId: string,
+  index: number,
+): Promise<ValidationResult<SubmissionRow>> {
+  return updateSubmission(submissionId, { kind: "delete_line", index });
 }

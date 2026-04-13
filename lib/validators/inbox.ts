@@ -477,6 +477,330 @@ export function parseBoolean(raw: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// FK resolution (pure, reusable across upload and edit paths)
+// ---------------------------------------------------------------------------
+
+type BankAccountRef = {
+  id: string;
+  name: string;
+  account_number: string | null;
+};
+
+type ProjectRef = {
+  id: string;
+  code: string | null;
+};
+
+type ContactRef = {
+  id: string;
+  ruc: string | null;
+};
+
+export type ResolutionRefs = {
+  bankAccounts: BankAccountRef[];
+  projects: ProjectRef[];
+  contactsByRuc: Map<string, ContactRef>;
+};
+
+/**
+ * Resolve the three header labels (bank_account, project, contact_ruc) into
+ * UUIDs using preloaded reference data. Pure — no DB calls. Mutates the passed
+ * header in place and returns any unresolved-label errors.
+ *
+ * SUNAT auto-create for unknown contacts is a separate, DB-side step handled
+ * by the caller in `app/actions/inbox.ts`.
+ */
+export function resolveHeaderLabelsToIds(
+  header: PaymentSubmissionHeader,
+  refs: ResolutionRefs,
+): SubmissionFieldError[] {
+  const errors: SubmissionFieldError[] = [];
+
+  // Bank account: exact name match → last-4-of-account-number fallback.
+  if (header.bank_account_label) {
+    const label = header.bank_account_label.trim();
+    const byName = refs.bankAccounts.find(
+      (b) => b.name.toLowerCase() === label.toLowerCase(),
+    );
+    if (byName) {
+      header.bank_account_id = byName.id;
+    } else {
+      const last4 = label.replace(/\D/g, "").slice(-4);
+      const byLast4 =
+        last4.length === 4
+          ? refs.bankAccounts.find((b) =>
+              (b.account_number ?? "").endsWith(last4),
+            )
+          : undefined;
+      if (byLast4) {
+        header.bank_account_id = byLast4.id;
+      } else {
+        header.bank_account_id = null;
+        errors.push({
+          path: "header.bank_account",
+          message: `Cuenta bancaria "${header.bank_account_label}" no encontrada`,
+        });
+      }
+    }
+  } else {
+    header.bank_account_id = null;
+  }
+
+  // Project: exact match by code. Optional field — missing label = no error.
+  if (header.project_code) {
+    const byCode = refs.projects.find(
+      (p) =>
+        p.code != null &&
+        p.code.toLowerCase() === header.project_code!.toLowerCase(),
+    );
+    if (byCode) {
+      header.project_id = byCode.id;
+    } else {
+      header.project_id = null;
+      errors.push({
+        path: "header.project_code",
+        message: `Proyecto "${header.project_code}" no encontrado`,
+      });
+    }
+  } else {
+    header.project_id = null;
+  }
+
+  // Contact: lookup in preloaded map by RUC. Unknown RUC stays unresolved —
+  // the caller decides whether to trigger a SUNAT auto-create.
+  if (header.contact_ruc) {
+    const found = refs.contactsByRuc.get(header.contact_ruc);
+    if (found) {
+      header.contact_id = found.id;
+    } else {
+      header.contact_id = null;
+    }
+  } else {
+    header.contact_id = null;
+  }
+
+  return errors;
+}
+
+// ---------------------------------------------------------------------------
+// Submission patches (Phase E — inline editing)
+// ---------------------------------------------------------------------------
+
+export const HEADER_EDITABLE_FIELDS = [
+  "payment_date",
+  "bank_account_label",
+  "currency",
+  "exchange_rate",
+  "bank_reference",
+  "is_detraction",
+  "contact_ruc",
+  "project_code",
+  "notes",
+] as const;
+
+export type HeaderEditableField = (typeof HEADER_EDITABLE_FIELDS)[number];
+
+export const LINE_EDITABLE_FIELDS = [
+  "amount",
+  "line_type",
+  "invoice_number_hint",
+  "cost_category_label",
+  "notes",
+] as const;
+
+export type LineEditableField = (typeof LINE_EDITABLE_FIELDS)[number];
+
+export type SubmissionPatch =
+  | { kind: "set_header"; field: HeaderEditableField; value: unknown }
+  | {
+      kind: "set_line";
+      index: number;
+      field: LineEditableField;
+      value: unknown;
+    }
+  | { kind: "add_line" }
+  | { kind: "delete_line"; index: number };
+
+/**
+ * Apply a patch to a submission's extracted_data payload, returning a new
+ * payload. Pure — no DB, no FK resolution, no validation. The caller must:
+ *   1. Run this to get the merged payload
+ *   2. Re-resolve FKs if the patch changed a label field
+ *   3. Re-run `validatePaymentSubmissionData` on the result
+ *   4. Persist + return to client
+ */
+export function applyPatchToExtractedData(
+  extracted: PaymentSubmissionExtractedData,
+  patch: SubmissionPatch,
+): ValidationResult<PaymentSubmissionExtractedData> {
+  // Deep clone so the caller never mutates the input.
+  const next: PaymentSubmissionExtractedData = {
+    kind: "payment",
+    header: { ...extracted.header },
+    lines: extracted.lines.map((l) => ({ ...l })),
+    validation: { valid: false, errors: [] },
+    csv_row_numbers: extracted.csv_row_numbers,
+  };
+
+  switch (patch.kind) {
+    case "set_header": {
+      const typed = coerceHeaderValue(patch.field, patch.value);
+      if (!typed.success) return typed;
+      // Assign via a narrow cast — each field on the header is either
+      // string|null, number|null, or boolean, so the coercion above
+      // already guarantees a safe shape.
+      (next.header as unknown as Record<string, unknown>)[patch.field] =
+        typed.data;
+      // When a label field changes, clear the cached id so the resolver
+      // re-runs from scratch on the next step.
+      if (patch.field === "bank_account_label") {
+        next.header.bank_account_id = null;
+      } else if (patch.field === "project_code") {
+        next.header.project_id = null;
+      } else if (patch.field === "contact_ruc") {
+        next.header.contact_id = null;
+      }
+      return success(next);
+    }
+    case "set_line": {
+      if (patch.index < 0 || patch.index >= next.lines.length) {
+        return failure("VALIDATION_ERROR", "Índice de línea fuera de rango", {
+          index: `Must be 0..${next.lines.length - 1}`,
+        });
+      }
+      const typed = coerceLineValue(patch.field, patch.value);
+      if (!typed.success) return typed;
+      const line = { ...next.lines[patch.index] };
+      (line as unknown as Record<string, unknown>)[patch.field] = typed.data;
+      // Changing the invoice number hint invalidates any previously-resolved
+      // invoice id; the editor may re-pick one on the next render.
+      if (patch.field === "invoice_number_hint") {
+        line.outgoing_invoice_id = null;
+        line.incoming_invoice_id = null;
+      }
+      if (patch.field === "cost_category_label") {
+        line.cost_category_id = null;
+      }
+      next.lines[patch.index] = line;
+      return success(next);
+    }
+    case "add_line": {
+      next.lines.push(blankLine());
+      return success(next);
+    }
+    case "delete_line": {
+      if (next.lines.length <= 1) {
+        return failure(
+          "VALIDATION_ERROR",
+          "No se puede eliminar la última línea",
+          { index: "At least one line is required" },
+        );
+      }
+      if (patch.index < 0 || patch.index >= next.lines.length) {
+        return failure("VALIDATION_ERROR", "Índice de línea fuera de rango", {
+          index: `Must be 0..${next.lines.length - 1}`,
+        });
+      }
+      next.lines.splice(patch.index, 1);
+      return success(next);
+    }
+  }
+}
+
+function coerceHeaderValue(
+  field: HeaderEditableField,
+  value: unknown,
+): ValidationResult<unknown> {
+  switch (field) {
+    case "payment_date":
+    case "bank_account_label":
+    case "bank_reference":
+    case "contact_ruc":
+    case "project_code":
+    case "notes":
+      return success(value == null ? null : String(value).trim() || null);
+    case "currency": {
+      const raw = value == null ? null : String(value).toUpperCase().trim();
+      if (raw !== null && raw !== "PEN" && raw !== "USD") {
+        return failure("VALIDATION_ERROR", "Moneda debe ser PEN o USD", {
+          currency: "Invalid",
+        });
+      }
+      return success(raw);
+    }
+    case "exchange_rate": {
+      if (value === null || value === "" || value === undefined) {
+        return success(null);
+      }
+      const n = Number(value);
+      if (!Number.isFinite(n) || n <= 0) {
+        return failure(
+          "VALIDATION_ERROR",
+          "Tipo de cambio debe ser mayor a 0",
+          { exchange_rate: "Invalid" },
+        );
+      }
+      return success(n);
+    }
+    case "is_detraction":
+      return success(Boolean(value));
+  }
+}
+
+function coerceLineValue(
+  field: LineEditableField,
+  value: unknown,
+): ValidationResult<unknown> {
+  switch (field) {
+    case "amount": {
+      if (value === null || value === "" || value === undefined) {
+        return success(null);
+      }
+      const n = Number(value);
+      if (!Number.isFinite(n)) {
+        return failure("VALIDATION_ERROR", "Monto inválido", {
+          amount: "Invalid",
+        });
+      }
+      return success(n);
+    }
+    case "line_type": {
+      const raw = value == null ? null : String(value).toLowerCase().trim();
+      if (
+        raw !== null &&
+        raw !== "invoice" &&
+        raw !== "bank_fee" &&
+        raw !== "detraction" &&
+        raw !== "loan" &&
+        raw !== "general"
+      ) {
+        return failure("VALIDATION_ERROR", "Tipo de línea inválido", {
+          line_type: "Invalid",
+        });
+      }
+      return success(raw);
+    }
+    case "invoice_number_hint":
+    case "cost_category_label":
+    case "notes":
+      return success(value == null ? null : String(value).trim() || null);
+  }
+}
+
+function blankLine(): PaymentSubmissionLine {
+  return {
+    amount: null,
+    line_type: null,
+    invoice_number_hint: null,
+    outgoing_invoice_id: null,
+    incoming_invoice_id: null,
+    cost_category_label: null,
+    cost_category_id: null,
+    notes: null,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Approval/rejection guards
 // ---------------------------------------------------------------------------
 

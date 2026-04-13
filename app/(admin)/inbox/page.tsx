@@ -1,5 +1,8 @@
 import { Upload } from "lucide-react";
 import { getInboxSubmissions, getInboxBatches } from "@/app/actions/inbox";
+import { getBankAccounts } from "@/app/actions/bank-accounts";
+import { getProjects } from "@/app/actions/projects";
+import { getCostCategories } from "@/app/actions/project-budgets";
 import { TopBar } from "@/components/app-shell/top-bar";
 import { ExchangeRateChip } from "@/components/app-shell/exchange-rate-chip";
 import { Button } from "@/components/ui/button";
@@ -31,13 +34,22 @@ export default async function InboxPage({ searchParams }: Props) {
   const statusParam = pickFirst(params.filter).trim();
   const reviewStatus = statusFromParam(statusParam);
 
-  const [submissionsResult, batchesResult] = await Promise.all([
+  const [
+    submissionsResult,
+    batchesResult,
+    banksResult,
+    projectsResult,
+    costCategoriesResult,
+  ] = await Promise.all([
     getInboxSubmissions({
       review_status: reviewStatus,
       import_batch_id: batchId ?? null,
       search: search || undefined,
     }),
     getInboxBatches(),
+    getBankAccounts({ is_active: true }),
+    getProjects(),
+    getCostCategories(),
   ]);
 
   const submissions = submissionsResult.success
@@ -47,6 +59,12 @@ export default async function InboxPage({ searchParams }: Props) {
   const activeBatch = batchId
     ? batches.find((b) => b.import_batch_id === batchId) ?? null
     : null;
+
+  const bankAccounts = banksResult.success ? banksResult.data.data : [];
+  const projects = projectsResult.success ? projectsResult.data.data : [];
+  const costCategories = costCategoriesResult.success
+    ? costCategoriesResult.data
+    : [];
 
   return (
     <div>
@@ -82,7 +100,12 @@ export default async function InboxPage({ searchParams }: Props) {
         ) : null}
 
         <div className="mt-5">
-          <InboxTable submissions={submissions} />
+          <InboxTable
+            submissions={submissions}
+            bankAccounts={bankAccounts}
+            projects={projects}
+            costCategories={costCategories}
+          />
         </div>
 
         {submissions.length > 0 ? (

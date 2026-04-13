@@ -6,6 +6,8 @@ import {
   validatePaymentSubmissionData,
   validateApproveSubmission,
   validateRejectSubmission,
+  resolveHeaderLabelsToIds,
+  applyPatchToExtractedData,
   normalizeDirection,
   normalizeCurrency,
   normalizeLineType,
@@ -13,7 +15,10 @@ import {
   parseNumberOrNull,
   parseBoolean,
   CSV_HEADER_COLUMNS,
+  HEADER_EDITABLE_FIELDS,
+  LINE_EDITABLE_FIELDS,
 } from "../inbox";
+import type { SubmissionPatch, ResolutionRefs } from "../inbox";
 import {
   SUBMISSION_STATUS,
   SUBMISSION_SOURCE_TYPE,
@@ -517,6 +522,273 @@ describe("validateRejectSubmission", () => {
       makeSubmission({ review_status: SUBMISSION_STATUS.rejected }),
     );
     expect(r.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveHeaderLabelsToIds
+// ---------------------------------------------------------------------------
+
+function makeRefs(
+  overrides: Partial<ResolutionRefs> = {},
+): ResolutionRefs {
+  return {
+    bankAccounts: [
+      { id: "bank-pen-1", name: "BCP-PEN-001", account_number: "194-12345-0012" },
+      { id: "bank-usd-1", name: "BCP-USD-001", account_number: "194-67890-0099" },
+    ],
+    projects: [{ id: "proj-1", code: "PRJ-2026-01" }],
+    contactsByRuc: new Map([
+      ["20512345678", { id: "contact-client-1", ruc: "20512345678" }],
+      ["20498765432", { id: "contact-vendor-1", ruc: "20498765432" }],
+    ]),
+    ...overrides,
+  };
+}
+
+describe("resolveHeaderLabelsToIds", () => {
+  it("resolves bank account by exact name", () => {
+    const h = { ...baseData().header, bank_account_label: "BCP-PEN-001" };
+    const errs = resolveHeaderLabelsToIds(h, makeRefs());
+    expect(errs).toHaveLength(0);
+    expect(h.bank_account_id).toBe("bank-pen-1");
+  });
+
+  it("resolves bank account by last-4 fallback when name differs", () => {
+    const h = { ...baseData().header, bank_account_label: "cuenta 0012" };
+    const errs = resolveHeaderLabelsToIds(h, makeRefs());
+    expect(errs).toHaveLength(0);
+    expect(h.bank_account_id).toBe("bank-pen-1");
+  });
+
+  it("flags bank account that doesn't match", () => {
+    const h = { ...baseData().header, bank_account_label: "Banco Ficticio" };
+    const errs = resolveHeaderLabelsToIds(h, makeRefs());
+    expect(errs.some((e) => e.path === "header.bank_account")).toBe(true);
+    expect(h.bank_account_id).toBeNull();
+  });
+
+  it("resolves project by code", () => {
+    const h = { ...baseData().header, project_code: "PRJ-2026-01" };
+    const errs = resolveHeaderLabelsToIds(h, makeRefs());
+    expect(errs).toHaveLength(0);
+    expect(h.project_id).toBe("proj-1");
+  });
+
+  it("flags unknown project code", () => {
+    const h = { ...baseData().header, project_code: "PRJ-9999" };
+    const errs = resolveHeaderLabelsToIds(h, makeRefs());
+    expect(errs.some((e) => e.path === "header.project_code")).toBe(true);
+    expect(h.project_id).toBeNull();
+  });
+
+  it("resolves contact by ruc", () => {
+    const h = { ...baseData().header, contact_ruc: "20512345678" };
+    const errs = resolveHeaderLabelsToIds(h, makeRefs());
+    expect(errs).toHaveLength(0);
+    expect(h.contact_id).toBe("contact-client-1");
+  });
+
+  it("leaves unknown contact unresolved without erroring (caller does SUNAT)", () => {
+    const h = { ...baseData().header, contact_ruc: "20999999999" };
+    const errs = resolveHeaderLabelsToIds(h, makeRefs());
+    // No error — it's the action layer's job to handle SUNAT fallback.
+    expect(errs.length).toBe(0);
+    expect(h.contact_id).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyPatchToExtractedData
+// ---------------------------------------------------------------------------
+
+describe("applyPatchToExtractedData", () => {
+  it("sets a header field and returns a new object", () => {
+    const src = baseData();
+    const patch: SubmissionPatch = {
+      kind: "set_header",
+      field: "payment_date",
+      value: "2026-05-01",
+    };
+    const r = applyPatchToExtractedData(src, patch);
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data).not.toBe(src); // new object
+    expect(r.data.header.payment_date).toBe("2026-05-01");
+    expect(src.header.payment_date).toBe("2026-04-02"); // original untouched
+  });
+
+  it("clears bank_account_id when bank_account_label changes", () => {
+    const src = baseData();
+    src.header.bank_account_id = "old-id";
+    const r = applyPatchToExtractedData(src, {
+      kind: "set_header",
+      field: "bank_account_label",
+      value: "Nueva Cuenta",
+    });
+    if (!r.success) throw new Error("should succeed");
+    expect(r.data.header.bank_account_id).toBeNull();
+    expect(r.data.header.bank_account_label).toBe("Nueva Cuenta");
+  });
+
+  it("clears contact_id when contact_ruc changes", () => {
+    const src = baseData();
+    src.header.contact_id = "old-id";
+    const r = applyPatchToExtractedData(src, {
+      kind: "set_header",
+      field: "contact_ruc",
+      value: "20999999999",
+    });
+    if (!r.success) throw new Error("should succeed");
+    expect(r.data.header.contact_id).toBeNull();
+    expect(r.data.header.contact_ruc).toBe("20999999999");
+  });
+
+  it("rejects invalid currency", () => {
+    const r = applyPatchToExtractedData(baseData(), {
+      kind: "set_header",
+      field: "currency",
+      value: "EUR",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("parses exchange_rate string to number", () => {
+    const r = applyPatchToExtractedData(baseData(), {
+      kind: "set_header",
+      field: "exchange_rate",
+      value: "3.82",
+    });
+    if (!r.success) throw new Error("should succeed");
+    expect(r.data.header.exchange_rate).toBe(3.82);
+  });
+
+  it("rejects non-positive exchange_rate", () => {
+    const r = applyPatchToExtractedData(baseData(), {
+      kind: "set_header",
+      field: "exchange_rate",
+      value: 0,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("sets a line amount", () => {
+    const src = baseData();
+    const r = applyPatchToExtractedData(src, {
+      kind: "set_line",
+      index: 0,
+      field: "amount",
+      value: "250.50",
+    });
+    if (!r.success) throw new Error("should succeed");
+    expect(r.data.lines[0].amount).toBe(250.5);
+    expect(src.lines[0].amount).toBe(100); // original untouched
+  });
+
+  it("rejects out-of-range line index on set_line", () => {
+    const r = applyPatchToExtractedData(baseData(), {
+      kind: "set_line",
+      index: 99,
+      field: "amount",
+      value: 100,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("clears invoice fk when invoice_number_hint changes", () => {
+    const src = baseData();
+    src.lines[0].outgoing_invoice_id = "inv-1";
+    const r = applyPatchToExtractedData(src, {
+      kind: "set_line",
+      index: 0,
+      field: "invoice_number_hint",
+      value: "F-NEW",
+    });
+    if (!r.success) throw new Error("should succeed");
+    expect(r.data.lines[0].outgoing_invoice_id).toBeNull();
+    expect(r.data.lines[0].invoice_number_hint).toBe("F-NEW");
+  });
+
+  it("appends a blank line on add_line", () => {
+    const src = baseData();
+    const r = applyPatchToExtractedData(src, { kind: "add_line" });
+    if (!r.success) throw new Error("should succeed");
+    expect(r.data.lines).toHaveLength(2);
+    expect(r.data.lines[1].amount).toBeNull();
+    expect(r.data.lines[1].line_type).toBeNull();
+  });
+
+  it("deletes a line by index", () => {
+    const src = baseData();
+    src.lines.push({
+      amount: 50,
+      line_type: "bank_fee",
+      invoice_number_hint: null,
+      outgoing_invoice_id: null,
+      incoming_invoice_id: null,
+      cost_category_label: null,
+      cost_category_id: null,
+      notes: null,
+    });
+    const r = applyPatchToExtractedData(src, {
+      kind: "delete_line",
+      index: 0,
+    });
+    if (!r.success) throw new Error("should succeed");
+    expect(r.data.lines).toHaveLength(1);
+    expect(r.data.lines[0].line_type).toBe("bank_fee");
+  });
+
+  it("refuses to delete the last remaining line", () => {
+    const r = applyPatchToExtractedData(baseData(), {
+      kind: "delete_line",
+      index: 0,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects out-of-range index on delete_line", () => {
+    const src = baseData();
+    src.lines.push({ ...src.lines[0] });
+    const r = applyPatchToExtractedData(src, {
+      kind: "delete_line",
+      index: 99,
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Editor config drift guard
+// ---------------------------------------------------------------------------
+
+describe("editor field config completeness", () => {
+  it("HEADER_EDITABLE_FIELDS covers all expected header fields except derived/locked", () => {
+    // Direction is intentionally omitted — locked after staging.
+    // bank_account_id / project_id / contact_id are derived from labels.
+    const expected = [
+      "payment_date",
+      "bank_account_label",
+      "currency",
+      "exchange_rate",
+      "bank_reference",
+      "is_detraction",
+      "contact_ruc",
+      "project_code",
+      "notes",
+    ];
+    expect([...HEADER_EDITABLE_FIELDS].sort()).toEqual(expected.sort());
+  });
+
+  it("LINE_EDITABLE_FIELDS covers the user-editable line fields", () => {
+    const expected = [
+      "amount",
+      "line_type",
+      "invoice_number_hint",
+      "cost_category_label",
+      "notes",
+    ];
+    expect([...LINE_EDITABLE_FIELDS].sort()).toEqual(expected.sort());
   });
 });
 
