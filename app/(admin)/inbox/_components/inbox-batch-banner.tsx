@@ -3,10 +3,10 @@
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { CheckCheck, FileSpreadsheet } from "lucide-react";
+import { CheckCheck, FileSpreadsheet, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/format";
-import { approveBatchValid } from "@/app/actions/inbox";
+import { approveBatchValid, rejectBatch } from "@/app/actions/inbox";
 
 type BatchSummary = {
   import_batch_id: string;
@@ -47,7 +47,34 @@ export function InboxBatchBanner({ batch }: Props) {
     });
   }
 
+  function handleRejectAll() {
+    if (
+      !window.confirm(
+        `¿Descartar las ${batch.pending} filas pendientes de este lote? Quedarán como rechazadas.`,
+      )
+    ) {
+      return;
+    }
+    startTransition(async () => {
+      const result = await rejectBatch(batch.import_batch_id);
+      if (!result.success) {
+        toast.error(result.error.message);
+        return;
+      }
+      const { rejected, failed } = result.data;
+      if (failed.length === 0) {
+        toast.success(`${rejected.length} filas rechazadas`);
+      } else {
+        toast.success(
+          `${rejected.length} rechazadas, ${failed.length} fallaron`,
+        );
+      }
+      router.refresh();
+    });
+  }
+
   const approveDisabled = pending || batch.valid === 0;
+  const rejectDisabled = pending || batch.pending === 0;
 
   return (
     <div className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3">
@@ -70,6 +97,17 @@ export function InboxBatchBanner({ batch }: Props) {
         </div>
       </div>
       <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5 text-red-600 hover:bg-red-50 hover:text-red-700"
+          disabled={rejectDisabled}
+          onClick={handleRejectAll}
+          title="Rechazar todas las filas pendientes del lote"
+        >
+          <XCircle className="h-3.5 w-3.5" />
+          Descartar lote
+        </Button>
         <Button
           size="sm"
           className="gap-1.5"

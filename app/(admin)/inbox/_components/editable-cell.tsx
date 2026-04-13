@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode } from "react";
-import { Pencil } from "lucide-react";
+import { Loader2, Pencil } from "lucide-react";
 import { InputEditor } from "./editors/input-editor";
 import { EnumEditor } from "./editors/enum-editor";
 import {
@@ -16,6 +16,8 @@ type Props = {
   cellId: string;
   /** The current cell id being edited (or null). Passed from parent. */
   activeEditId: string | null;
+  /** The cell id currently awaiting a server response (or null). */
+  savingCellId: string | null;
   onBeginEdit: (cellId: string) => void;
   onFinishEdit: () => void;
 
@@ -62,6 +64,7 @@ type Props = {
 export function EditableCell({
   cellId,
   activeEditId,
+  savingCellId,
   onBeginEdit,
   onFinishEdit,
   config,
@@ -77,10 +80,26 @@ export function EditableCell({
   className,
 }: Props) {
   const isEditing = activeEditId === cellId;
-  const someoneElseEditing = activeEditId !== null && activeEditId !== cellId;
+  const isSaving = savingCellId === cellId;
+  const someoneElseEditing =
+    (activeEditId !== null && activeEditId !== cellId) ||
+    (savingCellId !== null && savingCellId !== cellId);
 
   if (readOnly) {
     return <div className={className}>{display}</div>;
+  }
+
+  // Saving state: show spinner in the cell, preserve display content
+  // underneath. Clicks are ignored until the save resolves.
+  if (isSaving) {
+    return (
+      <div className={`relative ${className ?? ""}`}>
+        <div className="opacity-50">{display}</div>
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+        </div>
+      </div>
+    );
   }
 
   if (isEditing) {

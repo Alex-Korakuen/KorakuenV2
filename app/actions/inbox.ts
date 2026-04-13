@@ -875,6 +875,59 @@ export async function approveBatchValid(
 }
 
 // ---------------------------------------------------------------------------
+// rejectBatch
+// ---------------------------------------------------------------------------
+
+type BatchRejectionReport = {
+  rejected: string[];
+  failed: Array<{ id: string; error: string }>;
+};
+
+/**
+ * Reject every pending submission in a batch. Useful when an entire CSV
+ * was uploaded in error and the user wants to clear it out without
+ * touching each row. Best-effort loop like approveBatchValid: failures
+ * do not stop the batch, the report tallies successes and failures.
+ */
+export async function rejectBatch(
+  batchId: string,
+  notes?: string,
+): Promise<ValidationResult<BatchRejectionReport>> {
+  await requireAdmin();
+  const supabase = await createServerClient();
+
+  const { data, error } = await supabase
+    .from("submissions")
+    .select("id")
+    .eq("import_batch_id", batchId)
+    .eq("review_status", SUBMISSION_STATUS.pending)
+    .is("deleted_at", null);
+
+  if (error) {
+    return failure(
+      "NOT_FOUND",
+      `No se pudieron cargar las submissions del lote: ${error.message}`,
+    );
+  }
+
+  const report: BatchRejectionReport = { rejected: [], failed: [] };
+
+  for (const row of data ?? []) {
+    const result = await rejectSubmission(row.id as string, notes);
+    if (result.success) {
+      report.rejected.push(row.id as string);
+    } else {
+      report.failed.push({
+        id: row.id as string,
+        error: result.error.message,
+      });
+    }
+  }
+
+  return success(report);
+}
+
+// ---------------------------------------------------------------------------
 // buildCreatePaymentInputFromSubmission (internal)
 // ---------------------------------------------------------------------------
 

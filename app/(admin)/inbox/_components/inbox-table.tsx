@@ -84,6 +84,7 @@ export function InboxTable({
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [activeEditId, setActiveEditId] = useState<string | null>(null);
+  const [savingCellId, setSavingCellId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -112,21 +113,34 @@ export function InboxTable({
         })),
     [projects],
   );
-  const costCategoryOptions = useMemo<ComboboxOption[]>(
-    () => {
-      const byId = new Map(costCategories.map((c) => [c.id, c]));
-      return costCategories.map((c) => {
-        const parent = c.parent_id ? byId.get(c.parent_id) : null;
-        return {
-          id: c.id,
-          label: c.name,
-          value: c.name,
-          hint: parent?.name,
-        };
-      });
-    },
-    [costCategories],
-  );
+  const costCategoryOptions = useMemo<ComboboxOption[]>(() => {
+    const byId = new Map(costCategories.map((c) => [c.id, c]));
+
+    // Walk up the parent_id chain and join the ancestor names with " > "
+    // so the combobox hint shows the full path instead of only the
+    // immediate parent. Leaf name stays in `label` for compact display;
+    // ancestors-only in `hint` below it.
+    function ancestorPath(category: CostCategoryRow): string | undefined {
+      const chain: string[] = [];
+      let current: CostCategoryRow | undefined = category.parent_id
+        ? byId.get(category.parent_id)
+        : undefined;
+      // Hard cap to avoid infinite loops from bad parent_id data
+      let safety = 16;
+      while (current && safety-- > 0) {
+        chain.unshift(current.name);
+        current = current.parent_id ? byId.get(current.parent_id) : undefined;
+      }
+      return chain.length > 0 ? chain.join(" > ") : undefined;
+    }
+
+    return costCategories.map((c) => ({
+      id: c.id,
+      label: c.name,
+      value: c.name,
+      hint: ancestorPath(c),
+    }));
+  }, [costCategories]);
 
   function toggle(id: string) {
     setExpanded((prev) => {
@@ -161,7 +175,36 @@ export function InboxTable({
     });
   }
 
-  function handlePatch(submissionId: string, patch: SubmissionPatch) {
+  /**
+   * Apply a patch that originated from a specific cell. Sets savingCellId
+   * so only that cell shows a spinner; the rest of the table stays
+   * interactive.
+   */
+  function handleCellPatch(
+    cellId: string,
+    submissionId: string,
+    patch: SubmissionPatch,
+  ) {
+    setSavingCellId(cellId);
+    startTransition(async () => {
+      try {
+        const result = await updateSubmission(submissionId, patch);
+        if (result.success) {
+          router.refresh();
+        } else {
+          toast.error(result.error.message);
+        }
+      } finally {
+        setSavingCellId(null);
+      }
+    });
+  }
+
+  /**
+   * Apply a patch that isn't scoped to a single cell (add_line /
+   * delete_line). No per-cell spinner — uses the global `pending` flag.
+   */
+  function handleTablePatch(submissionId: string, patch: SubmissionPatch) {
     startTransition(async () => {
       const result = await updateSubmission(submissionId, patch);
       if (result.success) {
@@ -284,12 +327,15 @@ export function InboxTable({
                 data={data}
                 isOpen={expanded.has(s.id)}
                 activeEditId={activeEditId}
+                savingCellId={savingCellId}
                 onBeginEdit={setActiveEditId}
                 onFinishEdit={() => setActiveEditId(null)}
                 onToggle={() => toggle(s.id)}
                 onApprove={() => handleApprove(s.id)}
                 onReject={() => handleReject(s.id)}
-                onPatch={(patch) => handlePatch(s.id, patch)}
+                onCellPatch={(cellId, patch) =>
+                  handleCellPatch(cellId, s.id, patch)
+                }
                 onAddLine={() => handleAddLine(s.id)}
                 onDeleteLine={(i) => handleDeleteLine(s.id, i)}
                 pending={pending}
@@ -314,12 +360,13 @@ type PaymentGroupRowProps = {
   data: PaymentSubmissionExtractedData;
   isOpen: boolean;
   activeEditId: string | null;
+  savingCellId: string | null;
   onBeginEdit: (cellId: string) => void;
   onFinishEdit: () => void;
   onToggle: () => void;
   onApprove: () => void;
   onReject: () => void;
-  onPatch: (patch: SubmissionPatch) => void;
+  onCellPatch: (cellId: string, patch: SubmissionPatch) => void;
   onAddLine: () => void;
   onDeleteLine: (index: number) => void;
   pending: boolean;
@@ -333,12 +380,13 @@ function PaymentGroupRow({
   data,
   isOpen,
   activeEditId,
+  savingCellId,
   onBeginEdit,
   onFinishEdit,
   onToggle,
   onApprove,
   onReject,
-  onPatch,
+  onCellPatch,
   onAddLine,
   onDeleteLine,
   pending,
@@ -372,6 +420,7 @@ function PaymentGroupRow({
   const cellId = (suffix: string) => `${submission.id}:${suffix}`;
   const editProps = {
     activeEditId,
+    savingCellId,
     onBeginEdit,
     onFinishEdit,
     readOnly,
@@ -420,7 +469,7 @@ function PaymentGroupRow({
               </span>
             }
             onSave={(next) =>
-              onPatch({
+              onCellPatch(cellId("header.payment_date"), {
                 kind: "set_header",
                 field: "payment_date",
                 value: next,
@@ -448,7 +497,7 @@ function PaymentGroupRow({
               </p>
             }
             onSave={(next) =>
-              onPatch({
+              onCellPatch(cellId("header.bank_account_label"), {
                 kind: "set_header",
                 field: "bank_account_label",
                 value: next,
@@ -469,7 +518,7 @@ function PaymentGroupRow({
               </p>
             }
             onSave={(next) =>
-              onPatch({
+              onCellPatch(cellId("header.contact_ruc"), {
                 kind: "set_header",
                 field: "contact_ruc",
                 value: next,
@@ -491,7 +540,7 @@ function PaymentGroupRow({
               </span>
             }
             onSave={(next) =>
-              onPatch({
+              onCellPatch(cellId("header.project_code"), {
                 kind: "set_header",
                 field: "project_code",
                 value: next,
@@ -512,7 +561,7 @@ function PaymentGroupRow({
               </span>
             }
             onSave={(next) =>
-              onPatch({
+              onCellPatch(cellId("header.bank_reference"), {
                 kind: "set_header",
                 field: "bank_reference",
                 value: next,
@@ -558,9 +607,10 @@ function PaymentGroupRow({
           data={data}
           submissionId={submission.id}
           activeEditId={activeEditId}
+          savingCellId={savingCellId}
           onBeginEdit={onBeginEdit}
           onFinishEdit={onFinishEdit}
-          onPatch={onPatch}
+          onCellPatch={onCellPatch}
           onAddLine={onAddLine}
           onDeleteLine={onDeleteLine}
           readOnly={readOnly}
@@ -581,9 +631,10 @@ function DetailPanel({
   data,
   submissionId,
   activeEditId,
+  savingCellId,
   onBeginEdit,
   onFinishEdit,
-  onPatch,
+  onCellPatch,
   onAddLine,
   onDeleteLine,
   readOnly,
@@ -594,9 +645,10 @@ function DetailPanel({
   data: PaymentSubmissionExtractedData;
   submissionId: string;
   activeEditId: string | null;
+  savingCellId: string | null;
   onBeginEdit: (cellId: string) => void;
   onFinishEdit: () => void;
-  onPatch: (patch: SubmissionPatch) => void;
+  onCellPatch: (cellId: string, patch: SubmissionPatch) => void;
   onAddLine: () => void;
   onDeleteLine: (index: number) => void;
   readOnly: boolean;
@@ -604,7 +656,13 @@ function DetailPanel({
   headerContactId: string | null;
   headerDirection: "inbound" | "outbound" | null;
 }) {
-  const editProps = { activeEditId, onBeginEdit, onFinishEdit, readOnly };
+  const editProps = {
+    activeEditId,
+    savingCellId,
+    onBeginEdit,
+    onFinishEdit,
+    readOnly,
+  };
 
   return (
     <tr>
@@ -659,7 +717,7 @@ function DetailPanel({
                           </span>
                         }
                         onSave={(next) =>
-                          onPatch({
+                          onCellPatch(cid("amount"), {
                             kind: "set_line",
                             index: i,
                             field: "amount",
@@ -683,7 +741,7 @@ function DetailPanel({
                           </span>
                         }
                         onSave={(next) =>
-                          onPatch({
+                          onCellPatch(cid("line_type"), {
                             kind: "set_line",
                             index: i,
                             field: "line_type",
@@ -705,7 +763,7 @@ function DetailPanel({
                           </span>
                         }
                         onSave={(next) =>
-                          onPatch({
+                          onCellPatch(cid("notes"), {
                             kind: "set_line",
                             index: i,
                             field: "notes",
@@ -728,7 +786,7 @@ function DetailPanel({
                           </span>
                         }
                         onSave={(next) =>
-                          onPatch({
+                          onCellPatch(cid("cost_category_label"), {
                             kind: "set_line",
                             index: i,
                             field: "cost_category_label",
@@ -776,8 +834,9 @@ function DetailPanel({
                         }
                         onComboboxPick={(selection) => {
                           if (!headerDirection) return;
+                          const cellKey = cid("invoice_number_hint");
                           if (selection.kind === "option") {
-                            onPatch({
+                            onCellPatch(cellKey, {
                               kind: "set_line_invoice",
                               index: i,
                               hint: selection.option.label,
@@ -787,7 +846,7 @@ function DetailPanel({
                           } else if (selection.kind === "create") {
                             // Hint-only: the invoice will be created at
                             // approval time per Option B.
-                            onPatch({
+                            onCellPatch(cellKey, {
                               kind: "set_line_invoice",
                               index: i,
                               hint: selection.query,
@@ -795,7 +854,7 @@ function DetailPanel({
                               direction: headerDirection,
                             });
                           } else {
-                            onPatch({
+                            onCellPatch(cellKey, {
                               kind: "set_line_invoice",
                               index: i,
                               hint: null,
