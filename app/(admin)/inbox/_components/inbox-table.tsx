@@ -197,11 +197,24 @@ export function InboxTable({
   }
 
   return (
-    <div className="rounded-lg border border-border bg-card">
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
       <table
-        className="w-full text-sm"
+        className="w-full table-fixed text-sm"
         style={{ borderCollapse: "separate", borderSpacing: 0 }}
       >
+        <colgroup>
+          <col className="w-10" />
+          <col className="w-24" />
+          <col className="w-16" />
+          <col className="w-20" />
+          <col />
+          <col className="w-32" />
+          <col className="w-24" />
+          <col />
+          <col className="w-16" />
+          <col className="w-28" />
+          <col className="w-40" />
+        </colgroup>
         <thead>
           <tr className="bg-background">
             <th className="w-8 px-3 py-2.5" />
@@ -420,7 +433,7 @@ function PaymentGroupRow({
             value={header.bank_account_label}
             comboboxOptions={bankOptions}
             display={
-              <p className="text-foreground">
+              <p className="truncate text-foreground">
                 {header.bank_account_label ?? "—"}
               </p>
             }
@@ -463,7 +476,7 @@ function PaymentGroupRow({
             value={header.project_code}
             comboboxOptions={projectOptions}
             display={
-              <span className="font-mono text-xs text-muted-foreground">
+              <span className="block truncate font-mono text-xs text-muted-foreground">
                 {header.project_code ?? "—"}
               </span>
             }
@@ -484,7 +497,7 @@ function PaymentGroupRow({
             config={HEADER_FIELD_EDITORS.bank_reference}
             value={header.bank_reference}
             display={
-              <span className="font-mono text-xs text-muted-foreground">
+              <span className="block truncate font-mono text-xs text-muted-foreground">
                 {header.bank_reference ?? "—"}
               </span>
             }
@@ -581,7 +594,20 @@ function DetailPanel({
     <tr>
       <td colSpan={11} className="px-0 py-0">
         <div className="bg-muted/30">
-          <table className="w-full text-sm">
+          <table className="w-full table-fixed text-sm">
+            <colgroup>
+              <col className="w-10" />
+              <col className="w-20" />
+              <col className="w-24" />
+              <col className="w-28" />
+              <col />
+              <col className="w-36" />
+              <col className="w-32" />
+              <col />
+              <col />
+              <col />
+              <col className="w-12" />
+            </colgroup>
             <tbody>
               {data.lines.map((line, i) => {
                 const lineErrors = data.validation.errors.filter((e) =>
@@ -681,7 +707,7 @@ function DetailPanel({
                         value={line.cost_category_label}
                         comboboxOptions={costCategoryOptions}
                         display={
-                          <span className="font-mono text-xs text-muted-foreground">
+                          <span className="block truncate font-mono text-xs text-muted-foreground">
                             {line.cost_category_label ?? "—"}
                           </span>
                         }
@@ -703,7 +729,7 @@ function DetailPanel({
                         config={LINE_FIELD_EDITORS.invoice_number_hint}
                         value={line.invoice_number_hint}
                         display={
-                          <span className="font-mono text-xs text-muted-foreground">
+                          <span className="block truncate font-mono text-xs text-muted-foreground">
                             {line.invoice_number_hint ?? "—"}
                           </span>
                         }
