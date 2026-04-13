@@ -7,7 +7,6 @@ import {
   Receipt,
   Wallet,
 } from "lucide-react";
-import { requireAdmin } from "@/lib/auth";
 import { getFinancialPosition } from "@/app/actions/reports";
 import { getBankAccounts } from "@/app/actions/bank-accounts";
 import { formatMoney, formatPEN } from "@/lib/format";
@@ -17,9 +16,6 @@ import { cn } from "@/lib/utils";
 import { BankAccountDialog } from "./_components/bank-account-dialog";
 
 export default async function AdminDashboard() {
-  const user = await requireAdmin();
-  const firstName = (user.display_name ?? user.email).split(/[\s@]/)[0];
-
   const [positionResult, accountsResult] = await Promise.all([
     getFinancialPosition(),
     getBankAccounts({ is_active: true }),
@@ -49,15 +45,6 @@ export default async function AdminDashboard() {
     <div>
       <TopBar variant="admin" />
       <div className="max-w-4xl px-8 py-8">
-      <div className="mb-8">
-        <h2 className="text-xl font-semibold text-foreground">
-          Bienvenido, {firstName}
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Posición financiera de Constructora Korakuen E.I.R.L.
-        </p>
-      </div>
-
       {/* KPI cards */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
