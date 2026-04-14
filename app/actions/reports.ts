@@ -21,7 +21,6 @@ import {
   success,
   failure,
   PAYMENT_DIRECTION,
-  PAYMENT_LINE_TYPE,
   ACCOUNT_TYPE,
   OUTGOING_INVOICE_STATUS,
   INCOMING_INVOICE_FACTURA_STATUS,
@@ -690,7 +689,6 @@ export async function getFinancialPosition(
       .select(
         "loan_id, amount_pen, payments!inner(direction, deleted_at)",
       )
-      .eq("line_type", PAYMENT_LINE_TYPE.loan)
       .in(
         "loan_id",
         loans.map((l) => l.id),

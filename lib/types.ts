@@ -66,14 +66,6 @@ export const PAYMENT_DIRECTION = {
   outbound: 2,
 } as const;
 
-export const PAYMENT_LINE_TYPE = {
-  invoice: 1,
-  bank_fee: 2,
-  detraction: 3,
-  loan: 4,
-  general: 5,
-} as const;
-
 export const ACCOUNT_TYPE = {
   regular: 1,
   banco_de_la_nacion: 2,
@@ -451,10 +443,6 @@ export type PaymentLineRow = {
   incoming_invoice_id: string | null;
   loan_id: string | null;
   cost_category_id: string | null;
-  line_type: number;
-  // Per-line description — what this slice of the payment settles. Renamed
-  // from `notes` in the 20260413000004 migration; it was always a
-  // description, not free-form notes.
   description: string | null;
   created_at: string;
   updated_at: string;
@@ -821,7 +809,6 @@ export type CreatePaymentLineInput = {
   incoming_invoice_id?: string | null;
   loan_id?: string | null;
   cost_category_id?: string | null;
-  line_type: number;
   description?: string | null;
 };
 
@@ -903,19 +890,11 @@ export type PaymentSubmissionHeader = {
 
 export type PaymentSubmissionLine = {
   amount: number | null;
-  line_type:
-    | "invoice"
-    | "bank_fee"
-    | "detraction"
-    | "loan"
-    | "general"
-    | null;
   invoice_number_hint: string | null;
   outgoing_invoice_id: string | null;
   incoming_invoice_id: string | null;
   cost_category_label: string | null;
   cost_category_id: string | null;
-  // Per-line description (maps to payment_lines.description)
   description: string | null;
 };
 

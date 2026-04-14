@@ -418,12 +418,15 @@ limitation where a single bank transfer covering three invoices had to be split 
 three separate records.
 
 **Payment lines:**
-Each line has a `line_type` indicating its purpose:
-- `1 = invoice` — settles (part of) an outgoing or incoming invoice
-- `2 = bank_fee` — bank commission, never linked to an invoice
-- `3 = detraction` — Banco de la Nación deposit/withdrawal
-- `4 = loan` — loan repayment
-- `5 = general` — general expense with no document
+Each line says what the cash was for via its linkage columns:
+- **Settles an invoice** → `outgoing_invoice_id` or `incoming_invoice_id` is set
+- **Loan repayment / disbursement** → `loan_id` is set
+- **Bank commission** → `cost_category_id` points at the "Comisiones bancarias" node
+  (the line may ALSO be linked to an `incoming_invoice_id` when the bank issues a
+  factura for the commission)
+- **Detraction** → payment header flag (`is_detraction = true`, Banco de la Nación
+  account); line shape is identical to a regular payment
+- **General (dangling)** → no FK set at all; the line is waiting to be reconciled
 
 Invoice links (`outgoing_invoice_id`, `incoming_invoice_id`, `loan_id`) live on payment
 lines, not on the payment header. Each line can link to at most one document.
@@ -461,11 +464,11 @@ payment_date          — the date the cash actually moved
 payment_id            — FK → payments
 amount                — line amount in original currency
 amount_pen            — line amount in PEN
-line_type             — 1=invoice, 2=bank_fee, 3=detraction, 4=loan, 5=general
 outgoing_invoice_id   — nullable (set when this line settles an outgoing invoice)
 incoming_invoice_id   — nullable (set when this line settles an incoming invoice)
 loan_id               — nullable (set when this line repays a loan)
 cost_category_id      — nullable (for cost breakdown reporting)
+description           — nullable, per-line free-text memo
 ```
 
 **Constraint:** `outgoing_invoice_id`, `incoming_invoice_id`, and `loan_id` are mutually
@@ -603,7 +606,7 @@ automatically — it does not require a special case.
 ```
 1. Client pays full amount to regular account (should have deducted detraction)
 2. Payment recorded: inbound, regular account, full amount
-   Payment line: outgoing_invoice_id = invoice, line_type = 1 (invoice)
+   Payment line: outgoing_invoice_id = invoice
    [Invoice paid = total_pen, outstanding = 0 — the cash side is settled]
 3. Alex makes the detracción transfer: two real bank movements, opposite
    directions, different accounts, same amount (the detracción amount)

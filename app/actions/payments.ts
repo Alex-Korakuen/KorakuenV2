@@ -7,7 +7,6 @@ import {
   success,
   failure,
   PAYMENT_DIRECTION,
-  PAYMENT_LINE_TYPE,
   ACCOUNT_TYPE,
   INCOMING_INVOICE_FACTURA_STATUS,
 } from "@/lib/types";
@@ -33,6 +32,7 @@ import {
   validateReconcilePayment,
   validateUnreconcilePayment,
 } from "@/lib/validators/payments";
+import { lineIsUnlinked } from "@/lib/payment-lines";
 import { validateIncomingInvoice } from "@/lib/validators/invoices";
 import { requireExactExchangeRate } from "@/lib/exchange-rate";
 import { computeOutgoingInvoicePaymentProgress } from "@/lib/outgoing-invoice-computed";
@@ -81,7 +81,6 @@ type PaginatedPayments = {
 export type PaymentLineSplitInput = {
   amount: number;
   amount_pen: number;
-  line_type: number;
   outgoing_invoice_id?: string | null;
   incoming_invoice_id?: string | null;
   loan_id?: string | null;
@@ -146,15 +145,6 @@ function computeLineTotals(lines: CreatePaymentLineInput[]): {
     lines.reduce((acc, l) => acc + l.amount_pen, 0) * 100,
   ) / 100;
   return { totalAmount, totalAmountPen };
-}
-
-function lineIsUnlinked(line: PaymentLineRow): boolean {
-  return (
-    line.line_type === PAYMENT_LINE_TYPE.general &&
-    line.outgoing_invoice_id == null &&
-    line.incoming_invoice_id == null &&
-    line.loan_id == null
-  );
 }
 
 function buildPaymentComputed(lines: PaymentLineRow[]): PaymentComputed {
@@ -354,7 +344,6 @@ export async function getPayments(
     const { data: probe, error: probeError } = await supabase
       .from("payment_lines")
       .select("payment_id")
-      .eq("line_type", PAYMENT_LINE_TYPE.general)
       .is("outgoing_invoice_id", null)
       .is("incoming_invoice_id", null)
       .is("loan_id", null);
@@ -725,7 +714,6 @@ export async function createPayment(
     incoming_invoice_id: l.incoming_invoice_id ?? null,
     loan_id: l.loan_id ?? null,
     cost_category_id: l.cost_category_id ?? null,
-    line_type: l.line_type,
     description: l.description ?? null,
   }));
 
@@ -734,8 +722,7 @@ export async function createPayment(
     .insert(linesPayload);
 
   if (lineError) {
-    // Best-effort cleanup: hard-delete the just-inserted header since no
-    // line_type=3 links exist yet that would be affected by the cascade.
+    // Best-effort cleanup: hard-delete the just-inserted header.
     await supabase.from("payments").delete().eq("id", insertedPayment.id);
     return failure(
       "VALIDATION_ERROR",
@@ -816,7 +803,6 @@ export async function unlinkPaymentLineFromInvoice(
   const { error } = await supabase
     .from("payment_lines")
     .update({
-      line_type: PAYMENT_LINE_TYPE.general,
       outgoing_invoice_id: null,
       incoming_invoice_id: null,
       loan_id: null,
@@ -947,7 +933,6 @@ export async function splitPaymentLine(
     incoming_invoice_id: s.incoming_invoice_id ?? null,
     loan_id: s.loan_id ?? null,
     cost_category_id: s.cost_category_id ?? null,
-    line_type: s.line_type,
     description: s.description ?? null,
   }));
 
@@ -1057,7 +1042,6 @@ export async function linkPaymentLineToInvoice(
 
   if (decision.kind === "no_split") {
     const updatePayload: Record<string, unknown> = {
-      line_type: PAYMENT_LINE_TYPE.invoice,
       [linkColumn]: invoiceId,
       updated_at: nowISO(),
     };
@@ -1072,7 +1056,8 @@ export async function linkPaymentLineToInvoice(
     return fetchPaymentWithLinesAndComputed(supabase, parent.id);
   }
 
-  // Split path: insert Part A (fill) and Part B (remainder), delete original
+  // Split path: insert Part A (fill, carries the invoice link) and Part B
+  // (remainder, unlinked), delete original.
   const partA = {
     payment_id: parent.id,
     sort_order: line.sort_order,
@@ -1084,7 +1069,6 @@ export async function linkPaymentLineToInvoice(
       invoiceType === "incoming" ? invoiceId : null,
     loan_id: null,
     cost_category_id: line.cost_category_id,
-    line_type: PAYMENT_LINE_TYPE.invoice,
     description: line.description,
   };
   const partB = {
@@ -1096,7 +1080,6 @@ export async function linkPaymentLineToInvoice(
     incoming_invoice_id: null,
     loan_id: null,
     cost_category_id: line.cost_category_id,
-    line_type: PAYMENT_LINE_TYPE.general,
     description: line.description,
   };
 
@@ -1211,7 +1194,6 @@ export async function getLinkablePaymentLines(
     .select(
       "*, payments!inner(id, payment_date, bank_reference, contact_id, currency, is_detraction, direction, reconciled, deleted_at)",
     )
-    .eq("line_type", PAYMENT_LINE_TYPE.general)
     .is("outgoing_invoice_id", null)
     .is("incoming_invoice_id", null)
     .is("loan_id", null)
@@ -1326,7 +1308,6 @@ export async function getUnlinkedPaymentLines(
     .select(
       "*, payments!inner(id, payment_date, direction, contact_id, bank_reference, currency, is_detraction, reconciled, deleted_at)",
     )
-    .eq("line_type", PAYMENT_LINE_TYPE.general)
     .is("outgoing_invoice_id", null)
     .is("incoming_invoice_id", null)
     .is("loan_id", null)

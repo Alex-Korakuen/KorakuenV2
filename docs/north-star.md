@@ -209,8 +209,8 @@ One payment covering three invoices + a bank fee = one header,
 four lines. The header total always equals the sum of the lines.
 
 Informal vendors (no factura) are handled naturally: a payment line
-with `line_type = general` and no invoice link. When a factura
-eventually arrives, the line gets updated to link to it.
+with no invoice link (the line's FK columns are all null). When a
+factura eventually arrives, the line gets updated to link to it.
 
 ---
 
@@ -274,7 +274,7 @@ this is tracked in notebooks and WhatsApp messages.
   return rate/type, disbursement date, due date
 - Optional repayment schedule with individual due dates
 - Track repayments through the normal payment system (payment
-  line with `line_type = loan`)
+  line with `loan_id` set)
 - Loan balance always derived: principal minus sum of repayments
 - Status always derived: active / partially_repaid / settled
 

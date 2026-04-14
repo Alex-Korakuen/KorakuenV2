@@ -298,7 +298,7 @@ BN balance is reported separately because it can only be used for tax payments.
 
 ```
 principal_pen    = loans.principal_amount_pen
-total_repaid_pen = SUM(payment_lines.amount_pen WHERE loan_id = this AND line_type = loan)
+total_repaid_pen = SUM(payment_lines.amount_pen WHERE loan_id = this)
 balance_pen      = principal_pen − total_repaid_pen
 status           = CASE
                      WHEN total_repaid = 0           THEN 'active'

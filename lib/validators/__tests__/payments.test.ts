@@ -12,7 +12,6 @@ import {
 } from "../payments";
 import {
   PAYMENT_DIRECTION,
-  PAYMENT_LINE_TYPE,
   ACCOUNT_TYPE,
 } from "../../types";
 import type {
@@ -46,7 +45,6 @@ function makeLine(
   return {
     amount: 100,
     amount_pen: 100,
-    line_type: PAYMENT_LINE_TYPE.general,
     ...overrides,
   };
 }
@@ -257,42 +255,21 @@ describe("validatePaymentLine", () => {
     }
   });
 
-  it("rejects bank_fee line with an invoice link", () => {
+  it("accepts a loan line with loan_id", () => {
     const result = validatePaymentLine(
-      makeLine({
-        line_type: PAYMENT_LINE_TYPE.bank_fee,
-        outgoing_invoice_id: "out-1",
-      }),
-    );
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.fields?.line_type).toBeDefined();
-    }
-  });
-
-  it("rejects loan line without loan_id", () => {
-    const result = validatePaymentLine(
-      makeLine({ line_type: PAYMENT_LINE_TYPE.loan }),
-    );
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.fields?.loan_id).toBeDefined();
-    }
-  });
-
-  it("accepts loan line with loan_id", () => {
-    const result = validatePaymentLine(
-      makeLine({ line_type: PAYMENT_LINE_TYPE.loan, loan_id: "loan-1" }),
+      makeLine({ loan_id: "loan-1" }),
     );
     expect(result.success).toBe(true);
   });
 
-  it("rejects invalid line_type", () => {
-    const result = validatePaymentLine(makeLine({ line_type: 99 }));
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.fields?.line_type).toBeDefined();
-    }
+  it("accepts a bank-fee-style line linked to an incoming invoice (the bank's factura)", () => {
+    const result = validatePaymentLine(
+      makeLine({
+        incoming_invoice_id: "inv-bank-1",
+        cost_category_id: "cat-bank-fees",
+      }),
+    );
+    expect(result.success).toBe(true);
   });
 
   it("accepts a general line with a cost_category_id", () => {

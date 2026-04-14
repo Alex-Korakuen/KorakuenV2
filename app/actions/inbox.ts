@@ -15,7 +15,6 @@ import {
   SUBMISSION_SOURCE_TYPE,
   SOURCE,
   PAYMENT_DIRECTION,
-  PAYMENT_LINE_TYPE,
   OUTGOING_INVOICE_STATUS,
   INCOMING_INVOICE_FACTURA_STATUS,
 } from "@/lib/types";
@@ -24,7 +23,6 @@ import type {
   SubmissionRow,
   PaymentSubmissionExtractedData,
   PaymentSubmissionHeader,
-  PaymentSubmissionLine,
   BankAccountRow,
   ProjectRow,
   ContactRow,
@@ -1048,30 +1046,11 @@ async function buildCreatePaymentInputFromSubmission(
           ? l.incoming_invoice_id ?? null
           : null,
       cost_category_id: l.cost_category_id ?? null,
-      line_type: paymentLineTypeToCode(l.line_type),
       description: l.description,
     };
   });
 
   return success({ data, lines });
-}
-
-function paymentLineTypeToCode(
-  t: PaymentSubmissionLine["line_type"],
-): number {
-  switch (t) {
-    case "invoice":
-      return PAYMENT_LINE_TYPE.invoice;
-    case "bank_fee":
-      return PAYMENT_LINE_TYPE.bank_fee;
-    case "detraction":
-      return PAYMENT_LINE_TYPE.detraction;
-    case "loan":
-      return PAYMENT_LINE_TYPE.loan;
-    case "general":
-    default:
-      return PAYMENT_LINE_TYPE.general;
-  }
 }
 
 // ---------------------------------------------------------------------------

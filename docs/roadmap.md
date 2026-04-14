@@ -661,9 +661,8 @@ process is done. No validators gate on any of these columns.
 
 - `splitPaymentLine(lineId, splits[])` — replaces one line with N new
   lines whose amounts sum exactly to the original. Each split carries
-  its own `line_type`, document link, and `cost_category_id`. Header
-  totals are unchanged by construction. Blocked if the parent payment
-  is reconciled.
+  its own document link and `cost_category_id`. Header totals are
+  unchanged by construction. Blocked if the parent payment is reconciled.
 - `updatePaymentLine(lineId, patch)` — edits line metadata (`notes`,
   `cost_category_id`) without changing the amount or the invoice link.
   Link changes go through `linkPaymentLineToInvoice` /
@@ -678,21 +677,20 @@ process is done. No validators gate on any of these columns.
   4. If the contribution is **positive** AND
      `line.amount_pen > (total_pen - current_paid)`: auto-splits the
      line into two siblings — Part A fills the remaining outstanding
-     exactly (flipped to `line_type = invoice` with the invoice link
-     set), Part B is the remainder left as a fresh general line with
-     no link.
+     exactly and takes the invoice FK, Part B is the remainder left as
+     a fresh unlinked line.
   5. Otherwise links the whole line without splitting.
      Negative-direction contributions never split — refunds and
      self-detracción legs preserve their full amount as history.
 
   Blocked if reconciled.
-- `unlinkPaymentLineFromInvoice(lineId)` — reverses a prior link. Flips
-  `line_type` back to `general` and clears the invoice link. Does not
-  auto-merge with adjacent general lines. Blocked if reconciled.
+- `unlinkPaymentLineFromInvoice(lineId)` — reverses a prior link by
+  clearing the invoice FK on the line. Does not auto-merge with adjacent
+  unlinked lines. Blocked if reconciled.
 - `getLinkablePaymentLines(invoiceId, invoiceType, include_opposing_direction?)` —
   the candidate picker for the "Assign payment" button. Returns lines
-  where `line_type = general`, all document links are NULL, parent
-  payment is not reconciled or soft-deleted, and currency is compatible
+  where all document FKs are NULL, parent payment is not reconciled or
+  soft-deleted, and currency is compatible
   with the invoice currency under the rule below. **By default filters
   to direction-matched candidates** (inbound payments for outgoing
   invoices, outbound payments for incoming invoices) because that is
@@ -701,7 +699,7 @@ process is done. No validators gate on any of these columns.
   The server action accepts linking any direction regardless of this
   flag; the flag is purely a picker convenience.
 - `getUnlinkedPaymentLines(filters?)` — month-end cleanup view. Returns
-  all `line_type = general` lines with no document links, optionally
+  all lines with no document FKs set, optionally
   filtered by parent payment `direction`, `contact_id`,
   `date_from`/`date_to`, `reconciled`. Each line embeds its parent
   payment row.

@@ -26,7 +26,6 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import {
   PAYMENT_DIRECTION,
-  PAYMENT_LINE_TYPE,
   ACCOUNT_TYPE,
   INCOMING_INVOICE_FACTURA_STATUS,
   OUTGOING_INVOICE_STATUS,
@@ -469,7 +468,6 @@ async function insertPayment(
     paymentDate: string;
     lines: Array<{
       amountPen: number;
-      lineType: number;
       outgoingInvoiceId?: string | null;
       incomingInvoiceId?: string | null;
       loanId?: string | null;
@@ -519,7 +517,6 @@ async function insertPayment(
     outgoing_invoice_id: l.outgoingInvoiceId ?? null,
     incoming_invoice_id: l.incomingInvoiceId ?? null,
     loan_id: l.loanId ?? null,
-    line_type: l.lineType,
   }));
   const { error: lineErr } = await supabase.from("payment_lines").insert(lines);
   if (lineErr) {
@@ -675,7 +672,7 @@ async function setup(supabase: SupabaseClient): Promise<Fixtures> {
   // P5: outbound 3000, partnerA, linked to incomingReceivedFullyPaid (full)
   // P6: outbound 2500, partnerA, linked to incomingExpectedWithPayment
   //     (chase-list scenario — expected invoice with partial payment)
-  // P7: outbound 5000, partnerA, linked to loan (loan repayment, line_type=4)
+  // P7: outbound 5000, partnerA, linked to loan (loan repayment via loan_id)
   //     → repaid 5000 → outstanding 15000 → status partially_repaid
   const paymentIds: string[] = [];
   paymentIds.push(
@@ -689,7 +686,6 @@ async function setup(supabase: SupabaseClient): Promise<Fixtures> {
       lines: [
         {
           amountPen: 15000,
-          lineType: PAYMENT_LINE_TYPE.invoice,
           outgoingInvoiceId: outgoingSentAcceptedInPeriodId,
         },
       ],
@@ -702,7 +698,7 @@ async function setup(supabase: SupabaseClient): Promise<Fixtures> {
       projectId,
       paidByPartnerId: partnerAContactId,
       paymentDate: today(),
-      lines: [{ amountPen: 10000, lineType: PAYMENT_LINE_TYPE.general }],
+      lines: [{ amountPen: 10000 }],
     }),
   );
   paymentIds.push(
@@ -712,7 +708,7 @@ async function setup(supabase: SupabaseClient): Promise<Fixtures> {
       projectId,
       paidByPartnerId: partnerBContactId,
       paymentDate: today(),
-      lines: [{ amountPen: 12000, lineType: PAYMENT_LINE_TYPE.general }],
+      lines: [{ amountPen: 12000 }],
     }),
   );
   paymentIds.push(
@@ -726,7 +722,6 @@ async function setup(supabase: SupabaseClient): Promise<Fixtures> {
       lines: [
         {
           amountPen: 1500,
-          lineType: PAYMENT_LINE_TYPE.invoice,
           incomingInvoiceId: incomingReceivedOutstandingId,
         },
       ],
@@ -743,7 +738,6 @@ async function setup(supabase: SupabaseClient): Promise<Fixtures> {
       lines: [
         {
           amountPen: 3000,
-          lineType: PAYMENT_LINE_TYPE.invoice,
           incomingInvoiceId: incomingReceivedFullyPaidId,
         },
       ],
@@ -760,7 +754,6 @@ async function setup(supabase: SupabaseClient): Promise<Fixtures> {
       lines: [
         {
           amountPen: 2500,
-          lineType: PAYMENT_LINE_TYPE.invoice,
           incomingInvoiceId: incomingExpectedWithPaymentId,
         },
       ],
@@ -777,7 +770,6 @@ async function setup(supabase: SupabaseClient): Promise<Fixtures> {
       lines: [
         {
           amountPen: 5000,
-          lineType: PAYMENT_LINE_TYPE.loan,
           loanId,
         },
       ],
@@ -1074,7 +1066,6 @@ const scenarios: Scenario[] = [
       const { data: loanLines } = await supabase
         .from("payment_lines")
         .select("amount_pen, payments!inner(direction, deleted_at)")
-        .eq("line_type", PAYMENT_LINE_TYPE.loan)
         .eq("loan_id", fx.loanId)
         .is("payments.deleted_at", null);
 

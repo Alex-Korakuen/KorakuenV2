@@ -47,7 +47,6 @@ export const CSV_HEADER_COLUMNS = [
   "partner_ruc",
   "title",
   "line_amount",
-  "line_type",
   "project_code",
   "invoice_number",
   "cost_category",
@@ -70,7 +69,6 @@ export type RawCsvRow = {
   partner_ruc: string;
   title: string;
   line_amount: string;
-  line_type: string;
   project_code: string;
   invoice_number: string;
   cost_category: string;
@@ -134,7 +132,6 @@ export function parseCsvPaymentRows(
       partner_ruc: (raw.partner_ruc ?? "").toString(),
       title: (raw.title ?? "").toString(),
       line_amount: (raw.line_amount ?? "").toString(),
-      line_type: (raw.line_type ?? "").toString(),
       project_code: (raw.project_code ?? "").toString(),
       invoice_number: (raw.invoice_number ?? "").toString(),
       cost_category: (raw.cost_category ?? "").toString(),
@@ -259,7 +256,6 @@ export function buildSubmissionFromGroup(
 
   const lines: PaymentSubmissionLine[] = rows.map((r) => ({
     amount: parseNumberOrNull(r.line_amount),
-    line_type: normalizeLineType(r.line_type),
     invoice_number_hint: r.invoice_number || null,
     outgoing_invoice_id: null,
     incoming_invoice_id: null,
@@ -304,8 +300,7 @@ export function buildSubmissionFromGroup(
  * - exchange_rate, if supplied, must be > 0; blank is allowed (USD payments
  *   resolve the rate from the exchange_rates table at approval time)
  * - is_detraction=true forces currency=PEN
- * - At least one line; every line has amount>0 and a valid line_type
- * - line_type=loan cannot be resolved from CSV (no loan id) — flagged
+ * - At least one line; every line has amount>0
  */
 export function validatePaymentSubmissionData(
   data: PaymentSubmissionExtractedData,
@@ -401,30 +396,6 @@ export function validatePaymentSubmissionData(
           message: "Monto debe ser mayor a 0",
         });
       }
-      if (!line.line_type) {
-        errors.push({
-          path: `lines[${i}].line_type`,
-          message:
-            'Tipo de línea debe ser uno de: invoice, bank_fee, detraction, loan, general',
-        });
-      }
-      if (line.line_type === "loan") {
-        errors.push({
-          path: `lines[${i}].line_type`,
-          message:
-            "Líneas de tipo 'loan' no pueden importarse por CSV (requieren un préstamo existente en el sistema). Cambia el tipo o edita después de aprobar.",
-        });
-      }
-      if (
-        line.line_type === "bank_fee" &&
-        (line.invoice_number_hint || line.cost_category_label)
-      ) {
-        errors.push({
-          path: `lines[${i}].line_type`,
-          message:
-            "Líneas de tipo 'bank_fee' no pueden enlazar a factura ni categoría",
-        });
-      }
     });
   }
 
@@ -450,27 +421,6 @@ export function normalizeCurrency(
   const v = raw.trim().toUpperCase();
   if (v === "PEN" || v === "SOL" || v === "SOLES" || v === "S/") return "PEN";
   if (v === "USD" || v === "DOLAR" || v === "DOLARES" || v === "$") return "USD";
-  return null;
-}
-
-export function normalizeLineType(
-  raw: string,
-): PaymentSubmissionLine["line_type"] {
-  const v = raw.trim().toLowerCase().replace(/[\s-]/g, "_");
-  if (
-    v === "invoice" ||
-    v === "bank_fee" ||
-    v === "detraction" ||
-    v === "loan" ||
-    v === "general"
-  ) {
-    return v;
-  }
-  // Spanish aliases
-  if (v === "factura") return "invoice";
-  if (v === "comision" || v === "comisión") return "bank_fee";
-  if (v === "detraccion" || v === "detracción") return "detraction";
-  if (v === "prestamo" || v === "préstamo") return "loan";
   return null;
 }
 
@@ -653,7 +603,6 @@ export type HeaderEditableField = (typeof HEADER_EDITABLE_FIELDS)[number];
 
 export const LINE_EDITABLE_FIELDS = [
   "amount",
-  "line_type",
   "invoice_number_hint",
   "cost_category_label",
   "description",
@@ -859,22 +808,6 @@ function coerceLineValue(
       }
       return success(n);
     }
-    case "line_type": {
-      const raw = value == null ? null : String(value).toLowerCase().trim();
-      if (
-        raw !== null &&
-        raw !== "invoice" &&
-        raw !== "bank_fee" &&
-        raw !== "detraction" &&
-        raw !== "loan" &&
-        raw !== "general"
-      ) {
-        return failure("VALIDATION_ERROR", "Tipo de línea inválido", {
-          line_type: "Invalid",
-        });
-      }
-      return success(raw);
-    }
     case "invoice_number_hint":
     case "cost_category_label":
     case "description":
@@ -885,7 +818,6 @@ function coerceLineValue(
 function blankLine(): PaymentSubmissionLine {
   return {
     amount: null,
-    line_type: null,
     invoice_number_hint: null,
     outgoing_invoice_id: null,
     incoming_invoice_id: null,

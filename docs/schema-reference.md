@@ -59,7 +59,6 @@ These rules apply to all tables unless explicitly noted as an exception.
 | `factura_status` | `incoming_invoices` | 1=expected, 2=received |
 | `detraction_handled_by` | `incoming_invoices` | 1=self, 2=vendor_handled, 3=not_applicable |
 | `direction` | `payments` | 1=inbound, 2=outbound |
-| `payment_line_type` | `payment_lines` | 1=invoice, 2=bank_fee, 3=detraction, 4=loan, 5=general |
 | `account_type` | `bank_accounts` | 1=regular, 2=banco_de_la_nacion |
 | `tipo_persona` | `contacts` | 1=natural, 2=juridica |
 | `action` | `activity_log` | 1=created, 2=updated, 3=approved, 4=voided, 5=deleted, 6=restored, 7=matched |
@@ -896,20 +895,13 @@ payment_lines
   sort_order            smallint NOT NULL DEFAULT 0
   amount                numeric(15,2) NOT NULL
   amount_pen            numeric(15,2) NOT NULL
-  -- What this line settles (all nullable — only one should be set)
+  -- What this line settles (all nullable — at most one may be set)
   outgoing_invoice_id   uuid REFERENCES outgoing_invoices(id)
   incoming_invoice_id   uuid REFERENCES incoming_invoices(id)
   loan_id               uuid REFERENCES loans(id)
   -- Cost categorization (for reporting — nullable, outbound lines only)
   cost_category_id      uuid REFERENCES cost_categories(id)
-  -- Line classification
-  line_type             smallint NOT NULL DEFAULT 1
-    -- 1=invoice  — settles an outgoing or incoming invoice
-    -- 2=bank_fee — bank commission, never linked to an invoice
-    -- 3=detraction — BN deposit/withdrawal
-    -- 4=loan     — loan repayment
-    -- 5=general  — general expense with no document
-  notes                 text
+  description           text
   created_at            timestamptz NOT NULL DEFAULT now()
   updated_at            timestamptz NOT NULL DEFAULT now()
 
@@ -921,15 +913,24 @@ payment_lines
       (incoming_invoice_id IS NOT NULL)::int +
       (loan_id IS NOT NULL)::int <= 1
     )                                                  -- at most one document link per line
-  CONSTRAINT pl_bank_fee_no_invoice
-    CHECK (line_type != 2 OR (
-      outgoing_invoice_id IS NULL AND
-      incoming_invoice_id IS NULL AND
-      loan_id IS NULL
-    ))                                                 -- bank fees never link to documents
-  CONSTRAINT pl_loan_type
-    CHECK (line_type != 4 OR loan_id IS NOT NULL)      -- loan lines must have a loan_id
 ```
+
+**Line classification is derived, not stored.** The old `line_type` smallint column
+was dropped in migration `20260414000001_drop_payment_line_type` because every value
+it represented was already expressible via the columns above:
+
+| Old `line_type` | How the line is recognized today |
+|---|---|
+| `invoice` | `outgoing_invoice_id IS NOT NULL` or `incoming_invoice_id IS NOT NULL` |
+| `loan` | `loan_id IS NOT NULL` |
+| `bank_fee` | `cost_category_id` points under the "Comisiones bancarias" node in the cost-category tree (bank fees can also be linked to an `incoming_invoice` when the bank issues a factura for the commission) |
+| `detraction` | Handled at the payment header: `payments.is_detraction = true` or `bank_accounts.account_type = banco_de_la_nacion` |
+| `general` | None of the FKs are set and no bank-fee category |
+
+The CHECK constraint `pl_invoice_exclusive` (at most one of `outgoing_invoice_id` /
+`incoming_invoice_id` / `loan_id`) replaces the old `pl_bank_fee_no_invoice` and
+`pl_loan_type` rules — both of which referenced `line_type` and are dropped in the
+same migration.
 
 **Header recomputation:** After every line mutation, the engine atomically updates
 `payments.total_amount` and `payments.total_amount_pen`.
@@ -947,7 +948,6 @@ JOIN payments p ON p.id = pl.payment_id AND p.deleted_at IS NULL
 LEFT JOIN cost_categories cc ON cc.id = pl.cost_category_id
 WHERE p.project_id = :project_id
   AND p.direction = 2              -- outbound only
-  AND pl.line_type IN (1, 5)       -- invoice payments and general expenses
 GROUP BY cc.name
 ORDER BY total_spent DESC
 ```
@@ -974,14 +974,13 @@ ORDER BY total_spent DESC
 -- incoming_invoice_id in the exclusivity check and defaults to
 -- p.direction = 2 (outbound).
 SELECT
-  pl.id, pl.amount, pl.amount_pen, pl.notes,
+  pl.id, pl.amount, pl.amount_pen, pl.description,
   p.id AS payment_id, p.payment_date, p.bank_reference,
   p.contact_id, p.currency AS payment_currency, p.is_detraction,
   p.direction
 FROM payment_lines pl
 JOIN payments p ON p.id = pl.payment_id AND p.deleted_at IS NULL
-WHERE pl.line_type = 5                            -- general
-  AND pl.outgoing_invoice_id IS NULL
+WHERE pl.outgoing_invoice_id IS NULL              -- unlinked: no doc FK at all
   AND pl.incoming_invoice_id IS NULL
   AND pl.loan_id IS NULL
   AND p.reconciled = false
@@ -1031,12 +1030,14 @@ INSERT INTO payments (direction, bank_account_id, currency, total_amount_pen,
 VALUES (2, :bcp_id, 'PEN', 104.00, :vendor_id, '2026-04-09', 'TRF-00293847');
 
 -- Line 1: S/100 settles incoming invoice F001
-INSERT INTO payment_lines (payment_id, amount, amount_pen, incoming_invoice_id, line_type)
-VALUES (:payment_id, 100.00, 100.00, :invoice_f001_id, 1);
+INSERT INTO payment_lines (payment_id, amount, amount_pen, incoming_invoice_id)
+VALUES (:payment_id, 100.00, 100.00, :invoice_f001_id);
 
--- Line 2: S/4 bank fee, no document link
-INSERT INTO payment_lines (payment_id, amount, amount_pen, line_type, notes)
-VALUES (:payment_id, 4.00, 4.00, 2, 'Comisión bancaria');
+-- Line 2: S/4 bank fee, categorized but no document link
+-- (if the bank issues an incoming factura for the commission, the line gets
+-- incoming_invoice_id set alongside the bank-fees cost category)
+INSERT INTO payment_lines (payment_id, amount, amount_pen, cost_category_id, description)
+VALUES (:payment_id, 4.00, 4.00, :bank_fee_category_id, 'Comisión bancaria');
 ```
 
 **S/10,000 payment covering 3 invoices:**
@@ -1045,11 +1046,11 @@ INSERT INTO payments (direction, bank_account_id, currency, total_amount_pen,
   contact_id, payment_date)
 VALUES (2, :bcp_id, 'PEN', 10000.00, :vendor_id, '2026-04-09');
 
-INSERT INTO payment_lines (payment_id, amount, amount_pen, incoming_invoice_id, line_type)
+INSERT INTO payment_lines (payment_id, amount, amount_pen, incoming_invoice_id)
 VALUES
-  (:payment_id, 3000.00, 3000.00, :invoice_f001_id, 1),
-  (:payment_id, 4000.00, 4000.00, :invoice_f002_id, 1),
-  (:payment_id, 3000.00, 3000.00, :invoice_f003_id, 1);
+  (:payment_id, 3000.00, 3000.00, :invoice_f001_id),
+  (:payment_id, 4000.00, 4000.00, :invoice_f002_id),
+  (:payment_id, 3000.00, 3000.00, :invoice_f003_id);
 ```
 
 **Loan repayment example:**
@@ -1058,8 +1059,8 @@ INSERT INTO payments (direction, bank_account_id, currency, total_amount_pen,
   contact_id, payment_date)
 VALUES (2, :bcp_id, 'PEN', 5000.00, :lender_contact_id, '2026-04-09');
 
-INSERT INTO payment_lines (payment_id, amount, amount_pen, loan_id, line_type)
-VALUES (:payment_id, 5000.00, 5000.00, :loan_id, 4);
+INSERT INTO payment_lines (payment_id, amount, amount_pen, loan_id)
+VALUES (:payment_id, 5000.00, 5000.00, :loan_id);
 ```
 
 ---
@@ -1121,8 +1122,9 @@ loan_schedule
   updated_at  timestamptz NOT NULL DEFAULT now()
 ```
 
-**Repayments** flow through `payments` + `payment_lines` with `line_type = 4`
-and `loan_id` set on the line. No separate repayment table needed.
+**Repayments** flow through `payments` + `payment_lines` with `loan_id`
+set on the line (no separate type marker needed). No separate repayment
+table needed.
 
 **Loan status is always derived — never stored:**
 ```sql
@@ -1259,7 +1261,6 @@ CREATE INDEX idx_pl_incoming_invoice ON payment_lines(incoming_invoice_id)
   WHERE incoming_invoice_id IS NOT NULL;
 CREATE INDEX idx_pl_loan             ON payment_lines(loan_id)
   WHERE loan_id IS NOT NULL;
-CREATE INDEX idx_pl_type             ON payment_lines(line_type);
 CREATE INDEX idx_pl_cost_category    ON payment_lines(cost_category_id)
   WHERE cost_category_id IS NOT NULL;
 
@@ -1339,9 +1340,9 @@ These cannot be expressed as CHECK constraints and are enforced in application c
    line to an invoice, if the line's signed contribution is **positive**
    and its `amount_pen` exceeds the invoice's remaining outstanding
    (`total_pen - current_paid`), the engine atomically splits the line
-   into two siblings: Part A fills the outstanding exactly and takes
-   the invoice link (`line_type = invoice`); Part B holds the remainder
-   as a fresh `line_type = general` line with no link. Negative-direction
+   into two siblings: Part A fills the outstanding exactly and takes the
+   invoice link; Part B holds the remainder as a fresh line with no FK
+   link (it's "dangling" until it's re-linked or moved). Negative-direction
    contributions never split — they are refunds or self-detracción legs
    where the full amount is preserved as history. This replaces the
    pre-Step-10 over-allocation rejection; over-allocation is structurally
@@ -1350,24 +1351,20 @@ These cannot be expressed as CHECK constraints and are enforced in application c
 8. **Payment header total:** `payments.total_amount` must always equal
    `SUM(payment_lines.amount)`. Engine recomputes atomically after every line mutation.
 
-9. **Bank fee lines never link to documents:** `line_type = 2` lines must have
-   `outgoing_invoice_id`, `incoming_invoice_id`, and `loan_id` all null. Enforced
-   by DB constraint `pl_bank_fee_no_invoice` and engine validation.
-
-10. **Reconciliation immutability:** Payment lines on reconciled payments
+9. **Reconciliation immutability:** Payment lines on reconciled payments
     (`payments.reconciled = true`) cannot be added, edited, or deleted.
     Payment-header mutations are also blocked when `reconciled = true`.
 
-11. **Line item / header consistency:** Before a document leaves draft, the engine
+10. **Line item / header consistency:** Before a document leaves draft, the engine
     validates `SUM(line_items.total) = header.total` (±S/0.01).
 
-12. **Incoming invoice dual mode:** Header-only OR line items — not both simultaneously.
+11. **Incoming invoice dual mode:** Header-only OR line items — not both simultaneously.
     Once line items exist, header totals become read-only.
 
-13. **Submission promotion uniqueness:** A submission can only be approved once.
+12. **Submission promotion uniqueness:** A submission can only be approved once.
     Re-approving after `resulting_record_id` is set returns `409 CONFLICT`.
 
-14. **Outgoing invoice status is workflow-only.** The `status` column carries
+13. **Outgoing invoice status is workflow-only.** The `status` column carries
     only `draft | sent | void`. Payment progress and SUNAT registration are
     each derived at query time from payment_lines and the `estado_sunat`
     column respectively, returned under `_computed.payment_state` and

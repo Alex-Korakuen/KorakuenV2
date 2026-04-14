@@ -1,6 +1,5 @@
 import {
   PAYMENT_DIRECTION,
-  PAYMENT_LINE_TYPE,
   ACCOUNT_TYPE,
   withinTolerance,
   success,
@@ -106,20 +105,6 @@ export function validatePaymentLine(
   if (docLinks.length > 1) {
     fields.outgoing_invoice_id =
       "At most one of outgoing_invoice_id, incoming_invoice_id, loan_id can be set";
-  }
-
-  if (line.line_type === PAYMENT_LINE_TYPE.bank_fee && docLinks.length > 0) {
-    fields.line_type =
-      "Bank fee lines (line_type=2) cannot link to invoices or loans";
-  }
-
-  if (line.line_type === PAYMENT_LINE_TYPE.loan && !line.loan_id) {
-    fields.loan_id = "Required when line_type is loan (4)";
-  }
-
-  const validLineTypes = Object.values(PAYMENT_LINE_TYPE);
-  if (!validLineTypes.includes(line.line_type as typeof validLineTypes[number])) {
-    fields.line_type = `Must be one of: ${validLineTypes.join(", ")}`;
   }
 
   if (Object.keys(fields).length > 0) {

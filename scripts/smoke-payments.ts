@@ -29,7 +29,6 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import {
   PAYMENT_DIRECTION,
-  PAYMENT_LINE_TYPE,
   ACCOUNT_TYPE,
   INCOMING_INVOICE_FACTURA_STATUS,
   OUTGOING_INVOICE_STATUS,
@@ -466,7 +465,6 @@ async function createPayment(
     lines: Array<{
       amount: number;
       amountPen: number;
-      lineType: number;
       outgoingInvoiceId?: string | null;
       incomingInvoiceId?: string | null;
     }>;
@@ -520,7 +518,6 @@ async function createPayment(
     amount_pen: l.amountPen,
     outgoing_invoice_id: l.outgoingInvoiceId ?? null,
     incoming_invoice_id: l.incomingInvoiceId ?? null,
-    line_type: l.lineType,
   }));
   const { error: lineError } = await supabase
     .from("payment_lines")
@@ -579,14 +576,13 @@ async function fetchPaymentLines(
     id: string;
     amount: number;
     amount_pen: number;
-    line_type: number;
     outgoing_invoice_id: string | null;
     incoming_invoice_id: string | null;
   }>
 > {
   const { data, error } = await supabase
     .from("payment_lines")
-    .select("id, amount, amount_pen, line_type, outgoing_invoice_id, incoming_invoice_id")
+    .select("id, amount, amount_pen, outgoing_invoice_id, incoming_invoice_id")
     .eq("payment_id", paymentId)
     .order("sort_order", { ascending: true });
   if (error) throw new Error(`fetchPaymentLines: ${error.message}`);
@@ -594,7 +590,6 @@ async function fetchPaymentLines(
     id: string;
     amount: number;
     amount_pen: number;
-    line_type: number;
     outgoing_invoice_id: string | null;
     incoming_invoice_id: string | null;
   }>;
@@ -624,7 +619,6 @@ const scenarios: Scenario[] = [
           {
             amount: 10000,
             amountPen: 10000,
-            lineType: PAYMENT_LINE_TYPE.invoice,
             outgoingInvoiceId: fx.outgoingPenInvoiceId,
           },
         ],
@@ -655,7 +649,6 @@ const scenarios: Scenario[] = [
           {
             amount: 1200,
             amountPen: 1200,
-            lineType: PAYMENT_LINE_TYPE.detraction,
             outgoingInvoiceId: fx.outgoingPenInvoiceId,
           },
         ],
@@ -687,7 +680,6 @@ const scenarios: Scenario[] = [
           {
             amount: 1200,
             amountPen: 1200,
-            lineType: PAYMENT_LINE_TYPE.detraction,
             outgoingInvoiceId: fx.outgoingPenInvoiceId,
           },
         ],
@@ -728,7 +720,6 @@ const scenarios: Scenario[] = [
           {
             amount: 380,
             amountPen: 380,
-            lineType: PAYMENT_LINE_TYPE.detraction,
             outgoingInvoiceId: fx.outgoingUsdInvoiceId,
           },
         ],
@@ -786,13 +777,11 @@ const scenarios: Scenario[] = [
           {
             amount: decision.fillAmount,
             amountPen: decision.fillAmountPen,
-            lineType: PAYMENT_LINE_TYPE.invoice,
             incomingInvoiceId: fx.incomingPenInvoiceId,
           },
           {
             amount: decision.remainderAmount,
             amountPen: decision.remainderAmountPen,
-            lineType: PAYMENT_LINE_TYPE.general,
           },
         ],
       });
@@ -801,14 +790,12 @@ const scenarios: Scenario[] = [
       const lines = await fetchPaymentLines(supabase, result.id);
       assertEqual("S5.line_count", lines.length, 2);
       assertEqual("S5.partA.amount_pen", Number(lines[0].amount_pen), 5000);
-      assertEqual("S5.partA.line_type", lines[0].line_type, PAYMENT_LINE_TYPE.invoice);
       assertEqual(
         "S5.partA.linked",
         lines[0].incoming_invoice_id,
         fx.incomingPenInvoiceId,
       );
       assertEqual("S5.partB.amount_pen", Number(lines[1].amount_pen), 7000);
-      assertEqual("S5.partB.line_type", lines[1].line_type, PAYMENT_LINE_TYPE.general);
       assertEqual("S5.partB.unlinked", lines[1].incoming_invoice_id, null);
 
       // Invoice is now fully paid

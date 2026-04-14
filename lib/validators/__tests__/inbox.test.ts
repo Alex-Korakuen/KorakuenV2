@@ -10,7 +10,6 @@ import {
   applyPatchToExtractedData,
   normalizeDirection,
   normalizeCurrency,
-  normalizeLineType,
   normalizeDate,
   parseNumberOrNull,
   parseBoolean,
@@ -157,7 +156,7 @@ describe("groupRowsByGroupId", () => {
 describe("buildSubmissionFromGroup — happy paths", () => {
   it("builds a single-line inbound payment", () => {
     const csv = makeCsv([
-      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,,OP-445511,false,20512345678,,,11800.00,invoice,PRJ-2026-01,F001-00045,,",
+      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,,OP-445511,false,20512345678,,,11800.00,PRJ-2026-01,F001-00045,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -172,16 +171,15 @@ describe("buildSubmissionFromGroup — happy paths", () => {
     expect(sub.header.contact_ruc).toBe("20512345678");
     expect(sub.lines).toHaveLength(1);
     expect(sub.lines[0].amount).toBe(11800);
-    expect(sub.lines[0].line_type).toBe("invoice");
     expect(sub.lines[0].invoice_number_hint).toBe("F001-00045");
     expect(sub.validation.valid).toBe(true);
   });
 
   it("builds a 3-line outbound payment with bank fee", () => {
     const csv = makeCsv([
-      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-998877,false,20498765432,,,5900.00,invoice,PRJ-2026-01,F001-00089,,",
-      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-998877,false,20498765432,,,12.50,bank_fee,,,,comision",
-      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-998877,false,20498765432,,,100.00,general,PRJ-2026-01,,materiales,",
+      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-998877,false,20498765432,,,5900.00,PRJ-2026-01,F001-00089,,",
+      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-998877,false,20498765432,,,12.50,,,Comisiones bancarias,comision",
+      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-998877,false,20498765432,,,100.00,PRJ-2026-01,,materiales,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -189,11 +187,6 @@ describe("buildSubmissionFromGroup — happy paths", () => {
     const sub = buildSubmissionFromGroup("P002", groups.get("P002")!);
 
     expect(sub.lines).toHaveLength(3);
-    expect(sub.lines.map((l) => l.line_type)).toEqual([
-      "invoice",
-      "bank_fee",
-      "general",
-    ]);
     expect(sub.lines[0].amount).toBe(5900);
     expect(sub.lines[1].amount).toBe(12.5);
     expect(sub.csv_row_numbers).toEqual([2, 3, 4]);
@@ -202,7 +195,7 @@ describe("buildSubmissionFromGroup — happy paths", () => {
 
   it("marks a USD payment with exchange_rate as valid", () => {
     const csv = makeCsv([
-      "P003,2026-04-02,inbound,BCP-USD-001,USD,3.75,OP-5,false,20512345678,,,5000.00,invoice,PRJ-2026-01,F001-00050,,",
+      "P003,2026-04-02,inbound,BCP-USD-001,USD,3.75,OP-5,false,20512345678,,,5000.00,PRJ-2026-01,F001-00050,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -215,7 +208,7 @@ describe("buildSubmissionFromGroup — happy paths", () => {
 
   it("marks a BN detraction as valid when currency=PEN", () => {
     const csv = makeCsv([
-      "P004,2026-04-03,outbound,BN-DET-001,PEN,,DET-4411,true,20498765432,,,472.00,detraction,PRJ-2026-01,F001-00089,,",
+      "P004,2026-04-03,outbound,BN-DET-001,PEN,,DET-4411,true,20498765432,,,472.00,PRJ-2026-01,F001-00089,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -234,8 +227,8 @@ describe("buildSubmissionFromGroup — happy paths", () => {
 describe("buildSubmissionFromGroup — structural errors", () => {
   it("flags inconsistent header across rows of a group", () => {
     const csv = makeCsv([
-      "P001,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-1,false,20498765432,,,5900.00,invoice,PRJ-2026-01,F001-00089,,",
-      "P001,2026-04-02,outbound,BCP-USD-001,PEN,,TRF-1,false,20498765432,,,12.50,bank_fee,,,,",
+      "P001,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-1,false,20498765432,,,5900.00,PRJ-2026-01,F001-00089,,",
+      "P001,2026-04-02,outbound,BCP-USD-001,PEN,,TRF-1,false,20498765432,,,12.50,,,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -249,7 +242,7 @@ describe("buildSubmissionFromGroup — structural errors", () => {
 
   it("flags missing group_id", () => {
     const csv = makeCsv([
-      ",2026-04-02,inbound,BCP-PEN-001,PEN,,OP-1,false,20512345678,,,100,invoice,,,,",
+      ",2026-04-02,inbound,BCP-PEN-001,PEN,,OP-1,false,20512345678,,,100,,,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -294,7 +287,6 @@ function baseData(
     lines: [
       {
         amount: 100,
-        line_type: "invoice",
         invoice_number_hint: null,
         outgoing_invoice_id: null,
         incoming_invoice_id: null,
@@ -404,34 +396,6 @@ describe("validatePaymentSubmissionData", () => {
     expect(r.errors.some((e) => e.path === "lines[0].amount")).toBe(true);
   });
 
-  it("rejects unknown line_type", () => {
-    const d = baseData();
-    d.lines[0].line_type = null;
-    const r = validatePaymentSubmissionData(d);
-    expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.path === "lines[0].line_type")).toBe(true);
-  });
-
-  it("flags line_type=loan as unsupported via CSV", () => {
-    const d = baseData();
-    d.lines[0].line_type = "loan";
-    const r = validatePaymentSubmissionData(d);
-    expect(r.valid).toBe(false);
-    expect(
-      r.errors.some(
-        (e) =>
-          e.path === "lines[0].line_type" && /loan/.test(e.message),
-      ),
-    ).toBe(true);
-  });
-
-  it("rejects bank_fee line with an invoice hint", () => {
-    const d = baseData();
-    d.lines[0].line_type = "bank_fee";
-    d.lines[0].invoice_number_hint = "F001-00001";
-    const r = validatePaymentSubmissionData(d);
-    expect(r.valid).toBe(false);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -747,14 +711,12 @@ describe("applyPatchToExtractedData", () => {
     if (!r.success) throw new Error("should succeed");
     expect(r.data.lines).toHaveLength(2);
     expect(r.data.lines[1].amount).toBeNull();
-    expect(r.data.lines[1].line_type).toBeNull();
   });
 
   it("deletes a line by index", () => {
     const src = baseData();
     src.lines.push({
       amount: 50,
-      line_type: "bank_fee",
       invoice_number_hint: null,
       outgoing_invoice_id: null,
       incoming_invoice_id: null,
@@ -768,7 +730,7 @@ describe("applyPatchToExtractedData", () => {
     });
     if (!r.success) throw new Error("should succeed");
     expect(r.data.lines).toHaveLength(1);
-    expect(r.data.lines[0].line_type).toBe("bank_fee");
+    expect(r.data.lines[0].amount).toBe(50);
   });
 
   it("refuses to delete the last remaining line", () => {
@@ -785,7 +747,6 @@ describe("applyPatchToExtractedData", () => {
     src.lines[0].invoice_number_hint = "F001-00001";
     src.lines.push({
       amount: 50,
-      line_type: "invoice",
       invoice_number_hint: "F001-00002",
       outgoing_invoice_id: "inv-old-2",
       incoming_invoice_id: null,
@@ -905,7 +866,6 @@ describe("editor field config completeness", () => {
   it("LINE_EDITABLE_FIELDS covers the user-editable line fields", () => {
     const expected = [
       "amount",
-      "line_type",
       "invoice_number_hint",
       "cost_category_label",
       "description",
@@ -936,15 +896,6 @@ describe("normalizers", () => {
     expect(normalizeCurrency("usd")).toBe("USD");
     expect(normalizeCurrency("$")).toBe("USD");
     expect(normalizeCurrency("eur")).toBeNull();
-  });
-
-  it("normalizeLineType accepts en + es", () => {
-    expect(normalizeLineType("invoice")).toBe("invoice");
-    expect(normalizeLineType("factura")).toBe("invoice");
-    expect(normalizeLineType("bank-fee")).toBe("bank_fee");
-    expect(normalizeLineType("comisión")).toBe("bank_fee");
-    expect(normalizeLineType("detraccion")).toBe("detraction");
-    expect(normalizeLineType("otro")).toBeNull();
   });
 
   it("normalizeDate accepts ISO and DD/MM/YYYY", () => {

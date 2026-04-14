@@ -8,7 +8,6 @@ import {
   OUTGOING_INVOICE_STATUS,
   OUTGOING_QUOTE_STATUS,
   PAYMENT_DIRECTION,
-  PAYMENT_LINE_TYPE,
   PROJECT_STATUS,
   SUBMISSION_STATUS,
   TIPO_PERSONA,
@@ -147,18 +146,6 @@ const PAYMENT_DIRECTION_LABELS: Record<number, string> = {
 
 export function paymentDirectionLabel(direction: number): string {
   return PAYMENT_DIRECTION_LABELS[direction] ?? "Desconocido";
-}
-
-const PAYMENT_LINE_TYPE_LABELS: Record<number, string> = {
-  [PAYMENT_LINE_TYPE.invoice]: "Factura",
-  [PAYMENT_LINE_TYPE.bank_fee]: "Comisión bancaria",
-  [PAYMENT_LINE_TYPE.detraction]: "Detracción",
-  [PAYMENT_LINE_TYPE.loan]: "Préstamo",
-  [PAYMENT_LINE_TYPE.general]: "General",
-};
-
-export function paymentLineTypeLabel(type: number): string {
-  return PAYMENT_LINE_TYPE_LABELS[type] ?? "Desconocido";
 }
 
 const ACCOUNT_TYPE_LABELS: Record<number, string> = {
