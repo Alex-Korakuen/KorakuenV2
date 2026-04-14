@@ -636,14 +636,14 @@ export async function approveSubmission(
   const header = extracted.header;
 
   // FK liveness re-check (R2: contact could have been soft-deleted between
-  // stage and approval).
+  // stage and approval). bank_account is now conditionally required: a
+  // blank header.bank_account_id is valid iff the payment is off-book
+  // (non-Korakuen partner paying out of pocket). The partner_ruc half of
+  // that rule is enforced by the semantic validator above + createPayment
+  // below. Here we only verify that *if* a bank account is referenced,
+  // it's still active.
   const livenessErrors: SubmissionFieldError[] = [];
-  if (!header.bank_account_id) {
-    livenessErrors.push({
-      path: "header.bank_account",
-      message: "Cuenta bancaria no resuelta",
-    });
-  } else {
+  if (header.bank_account_id) {
     const bank = await fetchActiveById<BankAccountRow>(
       supabase,
       "bank_accounts",
@@ -947,12 +947,9 @@ async function buildCreatePaymentInputFromSubmission(
   // but the type system wants explicit narrowing. contact_id is NOT in the
   // required list — informal / unknown counterparties are a first-class
   // case (see validator rule: contact_ruc is optional).
-  if (
-    !h.payment_date ||
-    !h.direction ||
-    !h.bank_account_id ||
-    !h.currency
-  ) {
+  // bank_account_id is NOT in the required list — off-book partner-paid
+  // payments leave it null (see validatePaymentSubmissionData rule).
+  if (!h.payment_date || !h.direction || !h.currency) {
     return failure("VALIDATION_ERROR", "Submission incompleta", {
       build: "Missing required header fields after validation",
     });

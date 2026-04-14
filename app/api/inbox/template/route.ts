@@ -29,6 +29,13 @@ export async function GET() {
   //     named client/vendor in the by-counterparty reports.
   //   - partner_ruc: blank = Korakuen. Fill in only when one of the other
   //     consortium partners actually moved the money — feeds settlement.
+  //   - bank_account: blank ONLY when partner_ruc is a non-Korakuen partner.
+  //     Interpretation: "off-book" — the partner paid from their own funds,
+  //     so no Korakuen bank account is involved. The payment still appears
+  //     in cash flow, project cost, and settlement; it just doesn't affect
+  //     any Korakuen bank balance and doesn't show up in the reconciliation
+  //     queue. When partner_ruc is blank (Korakuen is the payer), a bank
+  //     account is mandatory.
   //   - exchange_rate: blank = auto-resolve from BCRP rate for payment_date
   //     (USD only; ignored for PEN).
   const examples = [
@@ -38,8 +45,10 @@ export async function GET() {
     `P002,2026-04-03,outbound,BCP Soles,PEN,,TRF-998877,false,20498765432,,Pago proveedor,5900.00,invoice,PRJ-2026-01,F001-00089,,`,
     `P002,2026-04-03,outbound,BCP Soles,PEN,,TRF-998877,false,20498765432,,Pago proveedor,12.50,bank_fee,,,,comisión de transferencia`,
     `P002,2026-04-03,outbound,BCP Soles,PEN,,TRF-998877,false,20498765432,,Pago proveedor,100.00,general,PRJ-2026-01,,Materiales,materiales varios`,
-    // P003 — outbound paid out of pocket by Partner B (partner_ruc filled in)
-    `P003,2026-04-04,outbound,BCP Soles,PEN,,TRF-112233,false,20499988877,20111222333,Pago materiales (Partner B),2500.00,general,PRJ-2026-01,,Materiales,pagó Partner B`,
+    // P003 — off-book outbound paid out of pocket by Partner B: bank_account
+    // is BLANK because no Korakuen account moved; partner_ruc identifies who
+    // covered the payment from their own funds.
+    `P003,2026-04-04,outbound,,PEN,,TRF-112233,false,20499988877,20111222333,Pago materiales (Partner B),2500.00,general,PRJ-2026-01,,Materiales,pagó Partner B`,
     // P004 — outbound cash purchase from an informal vendor (contact_ruc BLANK)
     `P004,2026-04-05,outbound,BCP Soles,PEN,,RET-445566,false,,,Compra materiales informal,450.00,general,PRJ-2026-01,,Materiales,Don Pedro ferretería`,
   ];

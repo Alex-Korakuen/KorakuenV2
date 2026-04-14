@@ -243,7 +243,11 @@ export default async function ConciliacionPage({ searchParams }: Props) {
                     <ReconcileRow
                       key={payment.id}
                       payment={payment}
-                      bank={banksById.get(payment.bank_account_id)}
+                      bank={
+                      payment.bank_account_id
+                        ? banksById.get(payment.bank_account_id)
+                        : undefined
+                    }
                       contraparte={
                         payment.contact_id
                           ? contactsById.get(payment.contact_id)
@@ -308,7 +312,11 @@ export default async function ConciliacionPage({ searchParams }: Props) {
                   <UnreconcileRow
                     key={payment.id}
                     payment={payment}
-                    bank={banksById.get(payment.bank_account_id)}
+                    bank={
+                      payment.bank_account_id
+                        ? banksById.get(payment.bank_account_id)
+                        : undefined
+                    }
                     contraparte={
                       payment.contact_id
                         ? contactsById.get(payment.contact_id)

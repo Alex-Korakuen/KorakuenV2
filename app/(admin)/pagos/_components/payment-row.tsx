@@ -44,7 +44,9 @@ function unlinkedAmountPen(lines: PaymentLineRow[]): number {
 export function PaymentRow({ payment, banksById, contactsById }: Props) {
   const [open, setOpen] = useState(false);
 
-  const bank = banksById.get(payment.bank_account_id);
+  const bank = payment.bank_account_id
+    ? banksById.get(payment.bank_account_id)
+    : undefined;
   const partnerContact = payment.paid_by_partner_id
     ? contactsById.get(payment.paid_by_partner_id)
     : undefined;
@@ -86,13 +88,21 @@ export function PaymentRow({ payment, banksById, contactsById }: Props) {
           {payment.bank_reference ?? "—"}
         </td>
         <td className="px-3 py-3">
-          <p className="text-sm truncate text-foreground">
-            {bank?.name ?? "—"}
-          </p>
-          {bank?.account_number && (
-            <p className="text-[11px] text-muted-foreground">
-              ···· {bank.account_number.slice(-4)}
+          {bank ? (
+            <>
+              <p className="text-sm truncate text-foreground">{bank.name}</p>
+              {bank.account_number && (
+                <p className="text-[11px] text-muted-foreground">
+                  ···· {bank.account_number.slice(-4)}
+                </p>
+              )}
+            </>
+          ) : payment.bank_account_id == null ? (
+            <p className="text-sm italic text-muted-foreground">
+              Off-book
             </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">—</p>
           )}
         </td>
         <td

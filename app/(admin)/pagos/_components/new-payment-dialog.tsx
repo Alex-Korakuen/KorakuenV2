@@ -106,12 +106,17 @@ export function NewPaymentDialog({ children }: { children: ReactNode }) {
   }
 
   async function handleSave() {
-    if (!bankAccount) {
-      toast.error("Selecciona una cuenta bancaria");
-      return;
-    }
     if (!partner) {
       toast.error("Selecciona el partner al que se atribuye el pago");
+      return;
+    }
+    // Bank account is mandatory only when Korakuen is the partner; a
+    // non-Korakuen partner paying out of pocket produces an off-book
+    // payment (bank_account_id = null on the server).
+    if (!bankAccount && partner.is_self) {
+      toast.error(
+        "Selecciona una cuenta bancaria (Korakuen no puede pagar sin cuenta)",
+      );
       return;
     }
     const cleanLines = lines.filter((l) => parseNum(l.amount) > 0);
@@ -125,7 +130,7 @@ export function NewPaymentDialog({ children }: { children: ReactNode }) {
     const result = await createPayment(
       {
         direction,
-        bank_account_id: bankAccount.id,
+        bank_account_id: bankAccount?.id ?? null,
         project_id: project?.id ?? null,
         contact_id: contactId,
         paid_by_partner_id: partner.id,
@@ -221,7 +226,12 @@ export function NewPaymentDialog({ children }: { children: ReactNode }) {
                 </div>
               </div>
               <div className="col-span-4">
-                <label className="text-[11px] text-muted-foreground">Banco</label>
+                <label className="text-[11px] text-muted-foreground">
+                  Banco
+                  {partner && !partner.is_self ? (
+                    <span className="text-muted-foreground/60"> (opcional — off-book)</span>
+                  ) : null}
+                </label>
                 <BankAccountPicker
                   value={bankAccount?.id ?? null}
                   onChange={(b) => {

@@ -36,9 +36,12 @@ export function validateCreatePayment(
     fields.direction = "Must be 1 (inbound) or 2 (outbound)";
   }
 
-  if (!data.bank_account_id) {
-    fields.bank_account_id = "Required";
-  }
+  // bank_account_id is now optional: a payment with no bank_account_id means
+  // a non-Korakuen consortium partner paid the vendor (or collected from the
+  // client) out of pocket — no Korakuen bank account was involved. The "must
+  // be a non-self partner" half of the rule requires a DB lookup on
+  // contacts.is_self, so it lives in the createPayment server action; the
+  // pure validator just allows null through.
 
   Object.assign(fields, validateCurrencyExchangeRate(data.currency, data.exchange_rate));
 

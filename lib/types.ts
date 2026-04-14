@@ -22,7 +22,6 @@ export const PROJECT_STATUS = {
   prospect: 1,
   active: 2,
   completed: 3,
-  archived: 4,
   rejected: 5,
 } as const;
 
@@ -406,7 +405,7 @@ export type LineItemRow = {
 export type PaymentRow = {
   id: string;
   direction: number;
-  bank_account_id: string;
+  bank_account_id: string | null;
   project_id: string | null;
   contact_id: string | null;
   paid_by_partner_id: string;
@@ -801,7 +800,7 @@ export type IncomingInvoiceLineItemRow = {
 
 export type CreatePaymentInput = {
   direction: number;
-  bank_account_id: string;
+  bank_account_id: string | null;
   project_id?: string | null;
   contact_id?: string | null;
   paid_by_partner_id: string;

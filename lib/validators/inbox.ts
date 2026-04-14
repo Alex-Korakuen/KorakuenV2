@@ -325,10 +325,18 @@ export function validatePaymentSubmissionData(
       message: 'Dirección debe ser "inbound" o "outbound"',
     });
   }
-  if (!h.bank_account_label) {
+  // bank_account_label is required only when the payment is attributed to
+  // Korakuen (partner_ruc blank = defaults to Korakuen at approval time).
+  // When a non-Korakuen partner_ruc is supplied, the payment is off-book
+  // (the partner paid out of pocket) and no Korakuen bank account exists
+  // to reference. The "partner_ruc must be non-self" half of the rule is
+  // enforced in the createPayment server action — the validator here
+  // can't see contacts.is_self.
+  if (!h.bank_account_label && !h.partner_ruc) {
     errors.push({
       path: "header.bank_account",
-      message: "Cuenta bancaria es requerida",
+      message:
+        "Cuenta bancaria es requerida (deja en blanco solo si indicas un partner_ruc diferente de Korakuen)",
     });
   }
   if (!h.currency) {

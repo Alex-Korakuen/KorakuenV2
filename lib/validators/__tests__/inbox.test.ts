@@ -324,6 +324,27 @@ describe("validatePaymentSubmissionData", () => {
     expect(validatePaymentSubmissionData(d).valid).toBe(true);
   });
 
+  it("rejects blank bank_account with blank partner_ruc (Korakuen must have a bank)", () => {
+    // Default case: partner_ruc blank = Korakuen. Without a bank account
+    // Korakuen has no way to move money.
+    const d = baseData();
+    d.header.bank_account_label = null;
+    d.header.partner_ruc = null;
+    const r = validatePaymentSubmissionData(d);
+    expect(r.valid).toBe(false);
+    expect(r.errors.some((e) => e.path === "header.bank_account")).toBe(true);
+  });
+
+  it("accepts blank bank_account when partner_ruc is supplied (off-book)", () => {
+    // A non-Korakuen partner paying out of pocket leaves bank_account
+    // blank. The "partner must be non-self" half of the rule is enforced
+    // in the createPayment server action, not this pure validator.
+    const d = baseData();
+    d.header.bank_account_label = null;
+    d.header.partner_ruc = "20111222333";
+    expect(validatePaymentSubmissionData(d).valid).toBe(true);
+  });
+
   it("rejects RUC with wrong length when supplied", () => {
     const d = baseData();
     d.header.contact_ruc = "12345";

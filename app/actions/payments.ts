@@ -548,29 +548,41 @@ export async function createPayment(
 
   const supabase = await createServerClient();
 
-  // Bank account + consistency + is_detraction derivation
-  const bankAccount = await fetchActiveById<BankAccountRow>(
-    supabase,
-    "bank_accounts",
-    data.bank_account_id,
-  );
-  if (!bankAccount) {
-    return failure("VALIDATION_ERROR", "La cuenta bancaria no existe", {
-      bank_account_id: "Bank account not found",
-    });
-  }
+  // Bank account + consistency + is_detraction derivation.
+  //
+  // bank_account_id is now optional — null means "no Korakuen account
+  // moved; a consortium partner covered this payment out of pocket". When
+  // null we skip the bank account lookup and the BN consistency check, and
+  // force is_detraction = false (detractions must flow through a Banco de
+  // la Nación account, which is by definition a Korakuen account).
+  let bankAccount: BankAccountRow | null = null;
+  if (data.bank_account_id) {
+    bankAccount = await fetchActiveById<BankAccountRow>(
+      supabase,
+      "bank_accounts",
+      data.bank_account_id,
+    );
+    if (!bankAccount) {
+      return failure("VALIDATION_ERROR", "La cuenta bancaria no existe", {
+        bank_account_id: "Bank account not found",
+      });
+    }
 
-  const bankCheck = validateBankAccountConsistency(data, bankAccount);
-  if (!bankCheck.success) {
-    return bankCheck as ValidationResult<PaymentWithLinesAndComputed>;
+    const bankCheck = validateBankAccountConsistency(data, bankAccount);
+    if (!bankCheck.success) {
+      return bankCheck as ValidationResult<PaymentWithLinesAndComputed>;
+    }
   }
 
   // Every payment must be attributed to a consortium partner. Verify the
   // referenced contact exists and actually carries is_partner=true, so we
   // catch a stale UUID or the wrong contact type before the FK insert.
+  // When bank_account_id is null (off-book partner payment), the partner
+  // must additionally be a non-self partner — Korakuen itself cannot pay
+  // without a real Korakuen bank account.
   const { data: partnerRow, error: partnerLookupError } = await supabase
     .from("contacts")
-    .select("id, is_partner, deleted_at")
+    .select("id, is_partner, is_self, deleted_at")
     .eq("id", data.paid_by_partner_id)
     .maybeSingle();
 
@@ -587,8 +599,18 @@ export async function createPayment(
       paid_by_partner_id: "Contact does not have is_partner = true",
     });
   }
+  if (!bankAccount && partnerRow.is_self) {
+    return failure(
+      "VALIDATION_ERROR",
+      "Korakuen no puede registrar pagos sin cuenta bancaria",
+      {
+        bank_account_id:
+          "Korakuen requires a bank account; only non-Korakuen partners can record off-book payments",
+      },
+    );
+  }
 
-  const isDetraction = deriveIsDetraction(bankAccount);
+  const isDetraction = bankAccount ? deriveIsDetraction(bankAccount) : false;
 
   // Currency + exchange rate
   const currency = data.currency ?? "PEN";
@@ -619,7 +641,7 @@ export async function createPayment(
         currency,
         inv.currency,
         isDetraction,
-        bankAccount.account_type,
+        bankAccount?.account_type ?? ACCOUNT_TYPE.regular,
       );
       if (!curCheck.success) {
         const scoped: Record<string, string> = {};
@@ -644,7 +666,7 @@ export async function createPayment(
         currency,
         inv.currency,
         isDetraction,
-        bankAccount.account_type,
+        bankAccount?.account_type ?? ACCOUNT_TYPE.regular,
       );
       if (!curCheck.success) {
         const scoped: Record<string, string> = {};
@@ -843,14 +865,19 @@ export async function splitPaymentLine(
   }
 
   // For any split that carries an invoice link, validate the currency
-  // rule against that invoice.
-  const bankAccount = await fetchActiveById<BankAccountRow>(
-    supabase,
-    "bank_accounts",
-    parent.bank_account_id,
-  );
-  if (!bankAccount) {
-    return failure("VALIDATION_ERROR", "Parent payment bank account not found");
+  // rule against that invoice. Off-book payments (bank_account_id NULL)
+  // skip the lookup; the BN-detraction cross-currency exception cannot
+  // apply without a Banco de la Nación account, so we pass regular.
+  let bankAccount: BankAccountRow | null = null;
+  if (parent.bank_account_id) {
+    bankAccount = await fetchActiveById<BankAccountRow>(
+      supabase,
+      "bank_accounts",
+      parent.bank_account_id,
+    );
+    if (!bankAccount) {
+      return failure("VALIDATION_ERROR", "Parent payment bank account not found");
+    }
   }
 
   for (let i = 0; i < splits.length; i++) {
@@ -870,7 +897,7 @@ export async function splitPaymentLine(
         parent.currency,
         inv.currency,
         parent.is_detraction,
-        bankAccount.account_type,
+        bankAccount?.account_type ?? ACCOUNT_TYPE.regular,
       );
       if (!curCheck.success) {
         return curCheck as ValidationResult<PaymentWithLinesAndComputed>;
@@ -891,7 +918,7 @@ export async function splitPaymentLine(
         parent.currency,
         inv.currency,
         parent.is_detraction,
-        bankAccount.account_type,
+        bankAccount?.account_type ?? ACCOUNT_TYPE.regular,
       );
       if (!curCheck.success) {
         return curCheck as ValidationResult<PaymentWithLinesAndComputed>;
@@ -965,13 +992,18 @@ export async function linkPaymentLineToInvoice(
     return mutableCheck as ValidationResult<PaymentWithLinesAndComputed>;
   }
 
-  const bankAccount = await fetchActiveById<BankAccountRow>(
-    supabase,
-    "bank_accounts",
-    parent.bank_account_id,
-  );
-  if (!bankAccount) {
-    return failure("VALIDATION_ERROR", "Parent payment bank account not found");
+  // Off-book payments (bank_account_id NULL) skip the bank account
+  // lookup; the BN-detraction cross-currency exception cannot apply.
+  let bankAccount: BankAccountRow | null = null;
+  if (parent.bank_account_id) {
+    bankAccount = await fetchActiveById<BankAccountRow>(
+      supabase,
+      "bank_accounts",
+      parent.bank_account_id,
+    );
+    if (!bankAccount) {
+      return failure("VALIDATION_ERROR", "Parent payment bank account not found");
+    }
   }
 
   const invoiceFetch = await fetchInvoiceForLink(supabase, invoiceId, invoiceType);
@@ -984,7 +1016,7 @@ export async function linkPaymentLineToInvoice(
     parent.currency,
     invoice.currency,
     parent.is_detraction,
-    bankAccount.account_type,
+    bankAccount?.account_type ?? ACCOUNT_TYPE.regular,
   );
   if (!curCheck.success) {
     return curCheck as ValidationResult<PaymentWithLinesAndComputed>;

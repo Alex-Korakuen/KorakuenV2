@@ -119,15 +119,18 @@ describe("validateCreatePayment — header rules", () => {
     }
   });
 
-  it("rejects missing bank_account_id", () => {
+  it("accepts null bank_account_id (off-book partner payment)", () => {
+    // bank_account_id became optional when we introduced off-book partner
+    // payments — a non-Korakuen consortium partner paying a vendor from
+    // their own funds leaves the bank account blank. The validator just
+    // lets null through; the "partner must be non-self" half of the rule
+    // lives in the createPayment server action because it needs a DB
+    // lookup on contacts.is_self.
     const result = validateCreatePayment(
-      makeHeader({ bank_account_id: "" }),
+      makeHeader({ bank_account_id: null }),
       [makeLine()],
     );
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.fields?.bank_account_id).toBeDefined();
-    }
+    expect(result.success).toBe(true);
   });
 
   it("rejects USD without exchange_rate", () => {
