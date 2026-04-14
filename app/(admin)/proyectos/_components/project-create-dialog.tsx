@@ -29,7 +29,6 @@ export function ProjectCreateDialog({ children }: { children: ReactNode }) {
   const [saving, setSaving] = useState(false);
 
   const [name, setName] = useState("");
-  const [code, setCode] = useState("");
   const [clientId, setClientId] = useState<string | null>(null);
   const [location, setLocation] = useState("");
   const [contractValue, setContractValue] = useState("");
@@ -40,7 +39,6 @@ export function ProjectCreateDialog({ children }: { children: ReactNode }) {
 
   function reset() {
     setName("");
-    setCode("");
     setClientId(null);
     setLocation("");
     setContractValue("");
@@ -64,7 +62,6 @@ export function ProjectCreateDialog({ children }: { children: ReactNode }) {
 
     const result = await createProject({
       name: name.trim(),
-      code: code.trim() || null,
       client_id: clientId,
       location: location.trim() || null,
       contract_value: contractValue
@@ -108,26 +105,15 @@ export function ProjectCreateDialog({ children }: { children: ReactNode }) {
         </DialogHeader>
 
         <div className="space-y-3 px-5 py-4">
-          {/* Nombre + Código */}
-          <div className="grid grid-cols-3 gap-2">
-            <div className="col-span-2">
-              <label className="text-[11px] text-muted-foreground">Nombre</label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Obra Parque Industrial"
-                className="mt-0.5"
-              />
-            </div>
-            <div>
-              <label className="text-[11px] text-muted-foreground">Código</label>
-              <Input
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder="PROY001"
-                className="mt-0.5 font-mono"
-              />
-            </div>
+          {/* Nombre */}
+          <div>
+            <label className="text-[11px] text-muted-foreground">Nombre</label>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Obra Parque Industrial"
+              className="mt-0.5"
+            />
           </div>
 
           {/* Cliente */}

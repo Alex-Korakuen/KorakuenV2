@@ -30,7 +30,6 @@ const STATUS_LABELS: Record<number, string> = {
   [PROJECT_STATUS.prospect]: "Prospecto",
   [PROJECT_STATUS.active]: "Activo",
   [PROJECT_STATUS.completed]: "Completado",
-  [PROJECT_STATUS.archived]: "Archivado",
   [PROJECT_STATUS.rejected]: "Rechazado",
 };
 
@@ -38,7 +37,6 @@ const STATUS_BADGE_CLASS: Record<number, string> = {
   [PROJECT_STATUS.prospect]: "bg-stone-100 text-stone-600",
   [PROJECT_STATUS.active]: "bg-sky-50 text-sky-700",
   [PROJECT_STATUS.completed]: "bg-emerald-50 text-emerald-700",
-  [PROJECT_STATUS.archived]: "bg-stone-50 text-stone-500",
   [PROJECT_STATUS.rejected]: "bg-rose-50 text-rose-700",
 };
 

@@ -231,8 +231,8 @@ Server actions in `app/actions/projects.ts`:
 - `createProject(data)`
 - `updateProject(id, data)` — strongly typed with `UpdateProjectInput`
 - `activateProject(id)` — prospect → active. Validates: contract exists, profit split = 100
-- `completeProject(id)` — active → completed
-- `archiveProject(id)` — completed → archived
+- `completeProject(id)` — active → completed (terminal)
+- `rejectProject(id)` — prospect/active → rejected (terminal)
 - `deleteProject(id)` — prospect only, blocks if any references exist
 - `getProject(id)` — detail view with embedded partners
 - `getProjectPartners(projectId)`

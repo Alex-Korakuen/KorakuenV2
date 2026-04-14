@@ -19,18 +19,16 @@ function pickFirst(v: string | string[] | undefined): string {
 }
 
 const STATUS_FILTERS = [
+  { key: "todos", label: "Todos", status: undefined },
   { key: "activos", label: "Activos", status: PROJECT_STATUS.active },
   { key: "prospectos", label: "Prospectos", status: PROJECT_STATUS.prospect },
   { key: "completados", label: "Completados", status: PROJECT_STATUS.completed },
-  { key: "archivados", label: "Archivados", status: PROJECT_STATUS.archived },
-  { key: "todos", label: "Todos", status: undefined },
 ] as const;
 
 const STATUS_LABELS: Record<number, string> = {
   [PROJECT_STATUS.prospect]: "Prospecto",
   [PROJECT_STATUS.active]: "Activo",
   [PROJECT_STATUS.completed]: "Completado",
-  [PROJECT_STATUS.archived]: "Archivado",
   [PROJECT_STATUS.rejected]: "Rechazado",
 };
 
@@ -38,14 +36,13 @@ const STATUS_BADGE_CLASS: Record<number, string> = {
   [PROJECT_STATUS.prospect]: "bg-stone-100 text-stone-600",
   [PROJECT_STATUS.active]: "bg-sky-50 text-sky-700",
   [PROJECT_STATUS.completed]: "bg-emerald-50 text-emerald-700",
-  [PROJECT_STATUS.archived]: "bg-stone-50 text-stone-500",
   [PROJECT_STATUS.rejected]: "bg-rose-50 text-rose-700",
 };
 
 export default async function ProyectosPage({ searchParams }: Props) {
   const params = await searchParams;
   const search = pickFirst(params.search).trim();
-  const filterKey = pickFirst(params.filter).trim() || "activos";
+  const filterKey = pickFirst(params.filter).trim() || "todos";
   const activeFilter =
     STATUS_FILTERS.find((f) => f.key === filterKey) ?? STATUS_FILTERS[0];
 
@@ -130,9 +127,7 @@ export default async function ProyectosPage({ searchParams }: Props) {
               const isUSD = project.contract_currency === "USD";
               const contractValue = summaryData?.contract_value_original ?? 0;
               const actualSpend = summaryData?.actual_spend_pen ?? 0;
-              const muted =
-                project.status === PROJECT_STATUS.archived ||
-                project.status === PROJECT_STATUS.rejected;
+              const muted = project.status === PROJECT_STATUS.rejected;
               return (
                 <Link
                   key={project.id}

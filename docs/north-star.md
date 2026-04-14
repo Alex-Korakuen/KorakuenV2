@@ -92,7 +92,7 @@ visible without clicking into each one.
 **What the system does:** A project list view showing for each
 project:
 
-- Status (prospect, active, completed, rejected, archived)
+- Status (prospect, active, completed, rejected)
 - Client name
 - Contract value (revenue)
 - Estimated cost (our internal budget for what we expect to spend)
@@ -523,8 +523,9 @@ These are real needs but belong elsewhere or in later phases:
 
 2. **Project status `rejected` — DECIDED.** Adding `5 = rejected` to the
    `projects.status` enum. Terminal state for lost bids and cancelled
-   projects. Distinct from `archived` (which is for completed projects
-   moved out of active views). Both filtered out of the default list.
+   projects. (Originally also had `archived = 4`; dropped 2026-04-13 —
+   see migration 20260413000006 — because it was never used and just added
+   a state with no real user-facing need.)
 
 3. **Cost category hierarchy — DECIDED.** Adding `parent_id uuid REFERENCES
    cost_categories(id)` self-reference. Phase 1 operates at the top level

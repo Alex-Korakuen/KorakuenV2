@@ -49,13 +49,6 @@ async function loadProjectForMutation(
     return failure("NOT_FOUND", "Project not found");
   }
 
-  if (project.status === PROJECT_STATUS.archived) {
-    return failure(
-      "CONFLICT",
-      "No se puede modificar el presupuesto de un proyecto archivado",
-      { status: "Project is archived" },
-    );
-  }
   if (project.status === PROJECT_STATUS.completed) {
     return failure(
       "CONFLICT",

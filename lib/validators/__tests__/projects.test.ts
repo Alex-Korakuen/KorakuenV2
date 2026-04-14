@@ -79,7 +79,6 @@ describe("validateCreateProject", () => {
   it("accepts valid input with all optional fields", () => {
     const result = validateCreateProject(
       makeProjectInput({
-        code: "PRY001",
         description: "Big project",
         location: "Lima",
         contract_value: 100000,
@@ -400,30 +399,18 @@ describe("project lifecycle transitions", () => {
       expect(canTransition("project", PROJECT_STATUS.active, PROJECT_STATUS.completed)).toBe(true);
     });
 
-    it("allows completed → archived", () => {
-      expect(canTransition("project", PROJECT_STATUS.completed, PROJECT_STATUS.archived)).toBe(true);
-    });
-
     it("rejects prospect → completed (skip)", () => {
       expect(canTransition("project", PROJECT_STATUS.prospect, PROJECT_STATUS.completed)).toBe(false);
-    });
-
-    it("rejects prospect → archived (skip)", () => {
-      expect(canTransition("project", PROJECT_STATUS.prospect, PROJECT_STATUS.archived)).toBe(false);
     });
 
     it("rejects active → prospect (backward)", () => {
       expect(canTransition("project", PROJECT_STATUS.active, PROJECT_STATUS.prospect)).toBe(false);
     });
 
-    it("rejects completed → active (backward)", () => {
+    it("rejects completed → anything (terminal)", () => {
+      expect(canTransition("project", PROJECT_STATUS.completed, PROJECT_STATUS.prospect)).toBe(false);
       expect(canTransition("project", PROJECT_STATUS.completed, PROJECT_STATUS.active)).toBe(false);
-    });
-
-    it("rejects archived → anything (terminal)", () => {
-      expect(canTransition("project", PROJECT_STATUS.archived, PROJECT_STATUS.prospect)).toBe(false);
-      expect(canTransition("project", PROJECT_STATUS.archived, PROJECT_STATUS.active)).toBe(false);
-      expect(canTransition("project", PROJECT_STATUS.archived, PROJECT_STATUS.completed)).toBe(false);
+      expect(canTransition("project", PROJECT_STATUS.completed, PROJECT_STATUS.rejected)).toBe(false);
     });
   });
 
@@ -452,7 +439,7 @@ describe("project lifecycle transitions", () => {
     });
 
     it("indicates no transitions for terminal state", () => {
-      const result = assertTransition("project", PROJECT_STATUS.archived, PROJECT_STATUS.active);
+      const result = assertTransition("project", PROJECT_STATUS.completed, PROJECT_STATUS.active);
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.error.fields?.status).toContain("No transitions");
@@ -475,12 +462,8 @@ describe("project lifecycle transitions", () => {
       ]);
     });
 
-    it("returns [archived] from completed", () => {
-      expect(getValidTransitions("project", PROJECT_STATUS.completed)).toEqual([PROJECT_STATUS.archived]);
-    });
-
-    it("returns [] from archived", () => {
-      expect(getValidTransitions("project", PROJECT_STATUS.archived)).toEqual([]);
+    it("returns [] from completed (terminal)", () => {
+      expect(getValidTransitions("project", PROJECT_STATUS.completed)).toEqual([]);
     });
 
     it("returns [] from rejected", () => {

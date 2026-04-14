@@ -365,11 +365,6 @@ export async function createIncomingQuote(
         project_id: "Project not found",
       });
     }
-    if (project.status === PROJECT_STATUS.archived) {
-      return failure("CONFLICT", "No se puede registrar un costo en un proyecto archivado", {
-        project_id: "Project is archived",
-      });
-    }
     if (project.status === PROJECT_STATUS.rejected) {
       return failure("CONFLICT", "No se puede registrar un costo en un proyecto rechazado", {
         project_id: "Project is rejected",

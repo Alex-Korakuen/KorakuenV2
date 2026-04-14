@@ -229,7 +229,7 @@ export type UpdateBankAccountInput = {
 export type ProjectRow = {
   id: string;
   name: string;
-  code: string | null;
+  code: string;
   status: number;
   client_id: string;
   description: string | null;
@@ -496,7 +496,6 @@ export type UpdateContactInput = {
 
 export type CreateProjectInput = {
   name: string;
-  code?: string | null;
   client_id: string;
   description?: string | null;
   location?: string | null;

@@ -36,10 +36,6 @@ const STATUS_LABEL: Record<number, { label: string; className: string }> = {
     label: "Completado",
     className: "bg-stone-100 text-stone-600",
   },
-  [PROJECT_STATUS.archived]: {
-    label: "Archivado",
-    className: "bg-stone-100 text-stone-500",
-  },
   [PROJECT_STATUS.rejected]: {
     label: "Rechazado",
     className: "bg-stone-100 text-stone-400",

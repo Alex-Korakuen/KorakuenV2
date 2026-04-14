@@ -70,20 +70,16 @@ known revenue target and a defined set of participating partner companies.
 
 **Lifecycle:**
 ```
-prospect → active → completed → [archived]
+prospect → active → completed
        ↘         ↘
        rejected  rejected
 ```
 
 - `prospect` — opportunity being pursued. A quote may exist. No contract yet.
 - `active` — contract signed. Invoicing has begun or will begin.
-- `completed` — all work done, all invoices issued, all payments received (or written off).
-- `archived` — completed project moved out of active views (tidy-up state).
+- `completed` — terminal. All work done, all invoices issued, all payments received (or written off).
 - `rejected` — terminal. For prospects that never converted (lost bids, dead leads)
-  or active projects that were cancelled. Distinct from `archived`: rejected means
-  the project did not succeed; archived means it succeeded and is closed out.
-
-Both `rejected` and `archived` are filtered out of the default project list.
+  or active projects that were cancelled.
 
 **One contract per project.** The relationship is always 1:1. If scope changes
 significantly enough to require a new contract, it is a new project.

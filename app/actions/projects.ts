@@ -189,21 +189,6 @@ export async function createProject(
     });
   }
 
-  // Check code uniqueness (includes deleted rows — DB UNIQUE is not partial)
-  if (data.code?.trim()) {
-    const { data: existing } = await supabase
-      .from("projects")
-      .select("id")
-      .eq("code", data.code.trim())
-      .maybeSingle();
-
-    if (existing) {
-      return failure("CONFLICT", "Ya existe un proyecto con este código", {
-        code: "Duplicate code",
-      });
-    }
-  }
-
   // Auto-set signed_date to today if not provided. The UI doesn't surface
   // this field (Alex's workflow doesn't care about contract sign date
   // separately), but the activation validator requires it.
@@ -244,12 +229,6 @@ export async function updateProject(
     return failure("NOT_FOUND", "Project not found");
   }
 
-  if (existing.status === PROJECT_STATUS.archived) {
-    return failure("CONFLICT", "No se puede modificar un proyecto archivado", {
-      status: "Project is archived",
-    });
-  }
-
   // Status cannot be changed directly — use lifecycle actions
   if ("status" in data) {
     return failure("IMMUTABLE_FIELD", "Use lifecycle actions to change project status", {
@@ -279,25 +258,9 @@ export async function updateProject(
     }
   }
 
-  // Check code uniqueness if changed (includes deleted rows)
-  if ("code" in validated && validated.code?.trim() && validated.code !== existing.code) {
-    const { data: dup } = await supabase
-      .from("projects")
-      .select("id")
-      .eq("code", validated.code.trim())
-      .neq("id", id)
-      .maybeSingle();
-
-    if (dup) {
-      return failure("CONFLICT", "Ya existe un proyecto con este código", {
-        code: "Duplicate code",
-      });
-    }
-  }
-
-  // Filter to allowed fields
+  // Filter to allowed fields (code is system-generated, immutable after insert)
   const ALLOWED_FIELDS = [
-    "name", "code", "client_id", "description", "location",
+    "name", "client_id", "description", "location",
     "contract_value", "contract_currency", "contract_exchange_rate",
     "igv_included", "billing_frequency", "signed_date", "contract_pdf_url",
     "start_date", "expected_end_date", "actual_end_date", "notes",
@@ -445,39 +408,6 @@ export async function completeProject(
 
   if (error || !updated) {
     return failure("VALIDATION_ERROR", error?.message ?? "Completion failed");
-  }
-
-  return success(updated as ProjectRow);
-}
-
-// ---------------------------------------------------------------------------
-// archiveProject — completed → archived
-// ---------------------------------------------------------------------------
-
-export async function archiveProject(
-  id: string,
-): Promise<ValidationResult<ProjectRow>> {
-  await requireAdmin();
-
-  const supabase = await createServerClient();
-
-  const project = await fetchActiveById<ProjectRow>(supabase, "projects", id);
-  if (!project) {
-    return failure("NOT_FOUND", "Project not found");
-  }
-
-  const transition = assertTransition("project", project.status, PROJECT_STATUS.archived);
-  if (!transition.success) return transition as ValidationResult<ProjectRow>;
-
-  const { data: updated, error } = await supabase
-    .from("projects")
-    .update({ status: PROJECT_STATUS.archived, updated_at: nowISO() })
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error || !updated) {
-    return failure("VALIDATION_ERROR", error?.message ?? "Archive failed");
   }
 
   return success(updated as ProjectRow);

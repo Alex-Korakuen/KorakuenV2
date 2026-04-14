@@ -28,7 +28,6 @@ const PROJECT_STATUS_LABELS: Record<number, string> = {
   [PROJECT_STATUS.prospect]: "Prospecto",
   [PROJECT_STATUS.active]: "Activo",
   [PROJECT_STATUS.completed]: "Completado",
-  [PROJECT_STATUS.archived]: "Archivado",
   [PROJECT_STATUS.rejected]: "Rechazado",
 };
 
@@ -36,7 +35,6 @@ const PROJECT_STATUS_VARIANTS: Record<number, BadgeVariant> = {
   [PROJECT_STATUS.prospect]: "secondary",
   [PROJECT_STATUS.active]: "info",
   [PROJECT_STATUS.completed]: "success",
-  [PROJECT_STATUS.archived]: "outline",
   [PROJECT_STATUS.rejected]: "destructive",
 };
 

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, CheckCircle2, PlayCircle, XCircle } from "lucide-react";
+import { CheckCircle2, PlayCircle, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -18,7 +18,6 @@ import {
 import {
   activateProject,
   completeProject,
-  archiveProject,
   rejectProject,
 } from "@/app/actions/projects";
 import { PROJECT_STATUS } from "@/lib/types";
@@ -107,39 +106,6 @@ export function LifecycleAction({ project }: Props) {
                 onClick={() => void run(completeProject, "Proyecto completado")}
               >
                 Completar
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      )}
-
-      {project.status === PROJECT_STATUS.completed && (
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1.5"
-              disabled={busy}
-            >
-              <Archive className="h-3.5 w-3.5" />
-              Archivar
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Archivar proyecto</AlertDialogTitle>
-              <AlertDialogDescription>
-                ¿Archivar este proyecto? Quedará oculto del listado activo pero
-                permanecerá en el historial.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancelar</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={() => void run(archiveProject, "Proyecto archivado")}
-              >
-                Archivar
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

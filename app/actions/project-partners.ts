@@ -59,16 +59,9 @@ export async function upsertProjectPartner(
 
   const supabase = await createServerClient();
 
-  // Verify project exists and is not archived
   const project = await fetchActiveById<ProjectRow>(supabase, "projects", projectId);
   if (!project) {
     return failure("NOT_FOUND", "Project not found");
-  }
-
-  if (project.status === PROJECT_STATUS.archived) {
-    return failure("CONFLICT", "No se pueden modificar los socios de un proyecto archivado", {
-      status: "Project is archived",
-    });
   }
 
   // Partners are frozen once a project is active. The settlement formula
@@ -192,11 +185,6 @@ export async function removeProjectPartner(
   if (project.status === PROJECT_STATUS.completed) {
     return failure("CONFLICT", "No se pueden eliminar socios de un proyecto completado", {
       status: "Project is completed",
-    });
-  }
-  if (project.status === PROJECT_STATUS.archived) {
-    return failure("CONFLICT", "No se pueden eliminar socios de un proyecto archivado", {
-      status: "Project is archived",
     });
   }
 

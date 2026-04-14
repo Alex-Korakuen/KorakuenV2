@@ -305,11 +305,6 @@ export async function createOutgoingInvoice(
       project_id: "Project not found",
     });
   }
-  if (project.status === PROJECT_STATUS.archived) {
-    return failure("CONFLICT", "No se puede facturar un proyecto archivado", {
-      project_id: "Project is archived",
-    });
-  }
   if (project.status === PROJECT_STATUS.rejected) {
     return failure("CONFLICT", "No se puede facturar un proyecto rechazado", {
       project_id: "Project is rejected",

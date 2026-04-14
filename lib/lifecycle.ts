@@ -18,7 +18,6 @@ const TRANSITIONS: Record<string, Record<number, number[]>> = {
   project: {
     [PROJECT_STATUS.prospect]: [PROJECT_STATUS.active, PROJECT_STATUS.rejected],
     [PROJECT_STATUS.active]: [PROJECT_STATUS.completed, PROJECT_STATUS.rejected],
-    [PROJECT_STATUS.completed]: [PROJECT_STATUS.archived],
   },
   outgoing_quote: {
     [OUTGOING_QUOTE_STATUS.draft]: [OUTGOING_QUOTE_STATUS.sent],
@@ -64,7 +63,6 @@ const STATUS_LABELS: Record<string, Record<number, string>> = {
     [PROJECT_STATUS.prospect]: "prospect",
     [PROJECT_STATUS.active]: "active",
     [PROJECT_STATUS.completed]: "completed",
-    [PROJECT_STATUS.archived]: "archived",
     [PROJECT_STATUS.rejected]: "rejected",
   },
   outgoing_quote: {

@@ -49,7 +49,7 @@ These rules apply to all tables unless explicitly noted as an exception.
 | Field | Table | Mapping |
 |---|---|---|
 | `role` | `users` | 1=admin, 2=partner |
-| `status` | `projects` | 1=prospect, 2=active, 3=completed, 4=archived, 5=rejected |
+| `status` | `projects` | 1=prospect, 2=active, 3=completed, 5=rejected |
 | `billing_frequency` | `projects` | 1=weekly, 2=biweekly, 3=monthly, 4=milestone |
 | `status` | `outgoing_quotes` | 1=draft, 2=sent, 3=approved, 4=rejected, 5=expired |
 | `status` | `outgoing_invoices` | 1=draft, 2=sent, 5=void (payment progress derived from payment_lines) |
@@ -278,9 +278,9 @@ a contract is signed. The engine validates that all contract fields are populate
 before allowing the project to transition to `active`.
 
 **`rejected` status** — for prospects that never converted (lost bids, dead leads)
-or active projects that were cancelled. Terminal state. Separate from `archived`,
-which is for completed projects moved out of active views for tidiness. Both are
-filtered out of the default project list.
+or active projects that were cancelled. Terminal state. `completed` is the other
+terminal state, for projects that finished successfully. Both remain queryable
+and show up in the default project list.
 
 **Estimated cost is not a column on this table.** A project's estimated cost is
 the sum of its `project_budgets` rows (see below). Totals are never stored.
@@ -389,8 +389,8 @@ tracked in `north-star.md` under "What's explicitly NOT in scope."
 
 **Mutation rules.** Budgets are editable while a project is in `prospect` or
 `active` status — planning during prospect, mid-project corrections during
-active. Once a project reaches `completed`, `archived`, or `rejected`, budget
-rows become immutable. Changing a budget after the project is frozen would
+active. Once a project reaches `completed` or `rejected`, budget rows become
+immutable. Changing a budget after the project is frozen would
 silently shift the historical "expected margin" figure the project summary
 endpoint derives, so the engine blocks all mutations with `409 CONFLICT` at
 those stages.
