@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import {
   AlertCircle,
   AlertTriangle,
-  Check,
   ChevronDown,
   ChevronRight,
   FileSpreadsheet,
@@ -34,6 +33,8 @@ import type {
 } from "@/lib/types";
 import type { SubmissionPatch } from "@/lib/validators/inbox";
 import { EditableCell } from "./editable-cell";
+import { RejectButton } from "./reject-button";
+import { SubmissionStatusPill } from "./submission-status-pill";
 import type { ComboboxOption } from "./editors/combobox-editor";
 import {
   HEADER_FIELD_EDITORS,
@@ -163,9 +164,9 @@ export function InboxTable({
     });
   }
 
-  function handleReject(id: string) {
+  function handleReject(id: string, notes?: string) {
     startTransition(async () => {
-      const result = await rejectSubmission(id);
+      const result = await rejectSubmission(id, notes);
       if (result.success) {
         toast.success("Submission rechazada");
       } else {
@@ -332,7 +333,7 @@ export function InboxTable({
                 onFinishEdit={() => setActiveEditId(null)}
                 onToggle={() => toggle(s.id)}
                 onApprove={() => handleApprove(s.id)}
-                onReject={() => handleReject(s.id)}
+                onReject={(notes) => handleReject(s.id, notes)}
                 onCellPatch={(cellId, patch) =>
                   handleCellPatch(cellId, s.id, patch)
                 }
@@ -365,7 +366,7 @@ type PaymentGroupRowProps = {
   onFinishEdit: () => void;
   onToggle: () => void;
   onApprove: () => void;
-  onReject: () => void;
+  onReject: (notes?: string) => void;
   onCellPatch: (cellId: string, patch: SubmissionPatch) => void;
   onAddLine: () => void;
   onDeleteLine: (index: number) => void;
@@ -418,12 +419,36 @@ function PaymentGroupRow({
     : "text-muted-foreground";
 
   const cellId = (suffix: string) => `${submission.id}:${suffix}`;
+
+  // Tab navigation cell order for the main row. List is in visual reading
+  // order; advanceMainRowCell wraps the lookup so each cell can request
+  // its own next/prev neighbor without knowing the full order.
+  const mainRowCellOrder = [
+    cellId("header.payment_date"),
+    cellId("header.bank_account_label"),
+    cellId("header.contact_ruc"),
+    cellId("header.project_code"),
+    cellId("header.bank_reference"),
+  ];
+
+  function advanceMainRowCell(
+    fromId: string,
+    direction: "forward" | "backward",
+  ) {
+    const idx = mainRowCellOrder.indexOf(fromId);
+    if (idx < 0) return;
+    const nextIdx = direction === "forward" ? idx + 1 : idx - 1;
+    if (nextIdx < 0 || nextIdx >= mainRowCellOrder.length) return;
+    onBeginEdit(mainRowCellOrder[nextIdx]);
+  }
+
   const editProps = {
     activeEditId,
     savingCellId,
     onBeginEdit,
     onFinishEdit,
     readOnly,
+    onAdvance: advanceMainRowCell,
   };
 
   return (
@@ -443,18 +468,19 @@ function PaymentGroupRow({
           )}
         </td>
         <td className="px-3 py-2.5">
-          {hasError ? (
-            <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-              <AlertTriangle className="h-3 w-3" />
-              {data.validation.errors.length}{" "}
-              {data.validation.errors.length === 1 ? "error" : "errores"}
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
-              <Check className="h-3 w-3" />
-              Válido
-            </span>
-          )}
+          <SubmissionStatusPill
+            reviewStatus={submission.review_status}
+            errorCount={data.validation.errors.length}
+          />
+          {submission.review_status === SUBMISSION_STATUS.rejected &&
+          submission.rejection_notes ? (
+            <p
+              className="mt-1 max-w-[180px] truncate text-[10px] italic text-muted-foreground"
+              title={submission.rejection_notes}
+            >
+              {submission.rejection_notes}
+            </p>
+          ) : null}
         </td>
         {/* Fecha */}
         <td className="px-3 py-2.5">
@@ -583,14 +609,10 @@ function PaymentGroupRow({
             className="flex items-center justify-end gap-1.5"
             onClick={(e) => e.stopPropagation()}
           >
-            <Button
-              size="sm"
-              variant="outline"
+            <RejectButton
               disabled={pending || activeEditId !== null || readOnly}
-              onClick={onReject}
-            >
-              Rechazar
-            </Button>
+              onConfirm={(notes) => onReject(notes)}
+            />
             <Button
               size="sm"
               disabled={pending || hasError || activeEditId !== null || readOnly}
@@ -656,14 +678,6 @@ function DetailPanel({
   headerContactId: string | null;
   headerDirection: "inbound" | "outbound" | null;
 }) {
-  const editProps = {
-    activeEditId,
-    savingCellId,
-    onBeginEdit,
-    onFinishEdit,
-    readOnly,
-  };
-
   return (
     <tr>
       <td colSpan={11} className="px-0 py-0">
@@ -689,6 +703,38 @@ function DetailPanel({
                 );
                 const hasLineError = lineErrors.length > 0;
                 const cid = (f: string) => `${submissionId}:lines[${i}].${f}`;
+
+                // Tab navigation order for this line. Same input editors
+                // get this; combobox/enum cells skip Tab handling because
+                // they save on selection.
+                const lineCellOrder = [
+                  cid("amount"),
+                  cid("line_type"),
+                  cid("description"),
+                  cid("cost_category_label"),
+                  cid("invoice_number_hint"),
+                ];
+                function advanceLineCell(
+                  fromId: string,
+                  direction: "forward" | "backward",
+                ) {
+                  const idx = lineCellOrder.indexOf(fromId);
+                  if (idx < 0) return;
+                  const nextIdx =
+                    direction === "forward" ? idx + 1 : idx - 1;
+                  if (nextIdx < 0 || nextIdx >= lineCellOrder.length) return;
+                  onBeginEdit(lineCellOrder[nextIdx]);
+                }
+
+                const editProps = {
+                  activeEditId,
+                  savingCellId,
+                  onBeginEdit,
+                  onFinishEdit,
+                  readOnly,
+                  onAdvance: advanceLineCell,
+                };
+
                 return (
                   <tr
                     key={`${submissionId}-${i}`}

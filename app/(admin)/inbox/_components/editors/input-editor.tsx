@@ -9,13 +9,28 @@ type Props = {
   initialValue: string | number | null;
   onSave: (next: string | number | null) => void;
   onCancel: () => void;
+  /**
+   * Optional callback for Tab/Shift+Tab navigation. When provided,
+   * pressing Tab commits the current value (same as Enter) and asks
+   * the parent to advance to the next/previous editable cell. When
+   * absent, Tab falls back to default DOM focus behavior.
+   */
+  onAdvance?: (direction: "forward" | "backward") => void;
 };
 
 /**
  * Plain HTML input with explicit save (Enter / ✓) and cancel (Esc / ✗).
- * Auto-selects text on mount for fast overwrite.
+ * Auto-selects text on mount for fast overwrite. When `onAdvance` is
+ * provided, Tab and Shift+Tab save the current value and jump to the
+ * next/previous editable cell in the row.
  */
-export function InputEditor({ config, initialValue, onSave, onCancel }: Props) {
+export function InputEditor({
+  config,
+  initialValue,
+  onSave,
+  onCancel,
+  onAdvance,
+}: Props) {
   const ref = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -45,6 +60,24 @@ export function InputEditor({ config, initialValue, onSave, onCancel }: Props) {
     }
   }
 
+  function commitAndAdvance(direction: "forward" | "backward") {
+    const raw = ref.current?.value ?? "";
+    if (raw === "") {
+      onSave(null);
+    } else if (config.inputType === "number") {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) {
+        onCancel();
+        onAdvance?.(direction);
+        return;
+      }
+      onSave(n);
+    } else {
+      onSave(raw.trim());
+    }
+    onAdvance?.(direction);
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -52,6 +85,9 @@ export function InputEditor({ config, initialValue, onSave, onCancel }: Props) {
     } else if (e.key === "Escape") {
       e.preventDefault();
       onCancel();
+    } else if (e.key === "Tab" && onAdvance) {
+      e.preventDefault();
+      commitAndAdvance(e.shiftKey ? "backward" : "forward");
     }
   }
 

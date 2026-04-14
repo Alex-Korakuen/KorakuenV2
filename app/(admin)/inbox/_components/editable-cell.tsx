@@ -52,6 +52,17 @@ type Props = {
   /** Disables editing entirely (e.g. submission is approved). */
   readOnly?: boolean;
 
+  /**
+   * Tab/Shift+Tab navigation. The parent receives the direction and
+   * the cellId of the cell that fired Tab; it advances activeEditId to
+   * the next sibling in the same section. Only meaningful for input
+   * editors — enum and combobox close on selection so Tab is moot.
+   */
+  onAdvance?: (
+    cellId: string,
+    direction: "forward" | "backward",
+  ) => void;
+
   /** Additional classes passed to the outer td or div. */
   className?: string;
 };
@@ -76,6 +87,7 @@ export function EditableCell({
   comboboxDisabledReason,
   comboboxCreateTailLabel,
   onComboboxPick,
+  onAdvance,
   readOnly,
   className,
 }: Props) {
@@ -117,6 +129,11 @@ export function EditableCell({
               onFinishEdit();
             }}
             onCancel={onFinishEdit}
+            onAdvance={
+              onAdvance
+                ? (direction) => onAdvance(cellId, direction)
+                : undefined
+            }
           />
         ) : config.kind === "enum" ? (
           <EnumEditor
