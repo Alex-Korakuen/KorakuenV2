@@ -23,7 +23,7 @@ import { ProjectPicker } from "@/components/widgets/project-picker";
 import { BankAccountPicker } from "@/components/widgets/bank-account-picker";
 import { PartnerPicker } from "@/components/widgets/partner-picker";
 import { createPayment } from "@/app/actions/payments";
-import { PAYMENT_DIRECTION, PAYMENT_LINE_TYPE } from "@/lib/types";
+import { PAYMENT_DIRECTION } from "@/lib/types";
 import { roundMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -31,23 +31,13 @@ import type { BankAccountRow, ProjectRow, ContactRow } from "@/lib/types";
 
 type LineDraft = {
   key: string;
-  line_type: number;
   description: string;
   amount: string;
-};
-
-const LINE_TYPE_LABELS: Record<number, string> = {
-  [PAYMENT_LINE_TYPE.invoice]: "Factura",
-  [PAYMENT_LINE_TYPE.detraction]: "Detracción",
-  [PAYMENT_LINE_TYPE.bank_fee]: "Comisión bancaria",
-  [PAYMENT_LINE_TYPE.loan]: "Préstamo",
-  [PAYMENT_LINE_TYPE.general]: "General",
 };
 
 function newLineDraft(): LineDraft {
   return {
     key: crypto.randomUUID(),
-    line_type: PAYMENT_LINE_TYPE.general,
     description: "",
     amount: "",
   };
@@ -146,7 +136,6 @@ export function NewPaymentDialog({ children }: { children: ReactNode }) {
           sort_order: i,
           amount: amt,
           amount_pen: currency === "PEN" ? amt : amt,
-          line_type: l.line_type,
           description: l.description.trim() || null,
         };
       }),
@@ -352,16 +341,12 @@ export function NewPaymentDialog({ children }: { children: ReactNode }) {
             >
               <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
                 <colgroup>
-                  <col style={{ width: "140px" }} />
                   <col />
                   <col style={{ width: "140px" }} />
                   <col style={{ width: "40px" }} />
                 </colgroup>
                 <thead>
                   <tr className="bg-background">
-                    <th className="text-left px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                      Tipo
-                    </th>
                     <th className="text-left px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                       Descripción
                     </th>
@@ -374,21 +359,6 @@ export function NewPaymentDialog({ children }: { children: ReactNode }) {
                 <tbody>
                   {lines.map((line) => (
                     <tr key={line.key} style={{ borderTop: "1px solid var(--border)" }}>
-                      <td className="px-2 py-1.5">
-                        <select
-                          value={line.line_type}
-                          onChange={(e) =>
-                            updateLine(line.key, { line_type: Number(e.target.value) })
-                          }
-                          className="w-full border border-transparent bg-transparent px-1.5 py-1 text-sm rounded focus:outline-none focus:border-primary focus:bg-background"
-                        >
-                          {Object.entries(LINE_TYPE_LABELS).map(([value, label]) => (
-                            <option key={value} value={value}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
                       <td className="px-2 py-1.5 overflow-hidden">
                         <input
                           type="text"
@@ -429,10 +399,7 @@ export function NewPaymentDialog({ children }: { children: ReactNode }) {
                     className="bg-background"
                     style={{ borderTop: "1px solid var(--border)" }}
                   >
-                    <td
-                      colSpan={2}
-                      className="px-3 py-2 text-[11px] font-medium text-muted-foreground"
-                    >
+                    <td className="px-3 py-2 text-[11px] font-medium text-muted-foreground">
                       Total
                     </td>
                     <td className="text-right px-3 py-2 tabular-nums font-semibold text-foreground">
@@ -447,7 +414,7 @@ export function NewPaymentDialog({ children }: { children: ReactNode }) {
               </table>
             </div>
             <p className="mt-2 text-[11px] text-muted-foreground/60">
-              Las líneas de tipo <strong>Factura</strong> se pueden vincular a una factura desde el detalle del pago después de guardar.
+              Las líneas pueden vincularse a una factura desde el detalle del pago después de guardar.
             </p>
           </div>
         </div>

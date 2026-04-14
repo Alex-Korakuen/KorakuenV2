@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { Check, X } from "lucide-react";
 import { formatPEN, formatDate } from "@/lib/format";
-import { PAYMENT_DIRECTION, PAYMENT_LINE_TYPE } from "@/lib/types";
+import { PAYMENT_DIRECTION } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import type { BankAccountRow, ContactRow, PaymentLineRow } from "@/lib/types";
+import type { BankAccountRow, ContactRow } from "@/lib/types";
 import type { PaymentWithLinesAndComputed } from "@/app/actions/payments";
+import { unlinkedAmountPen } from "@/lib/payment-lines";
 import { PaymentDetailDialog } from "./payment-detail-dialog";
 
 type Props = {
@@ -24,21 +25,6 @@ function deriveShortLabel(razonSocial: string): string {
     return words.slice(0, 4).map((w) => w[0]).join("").toUpperCase();
   }
   return (words[0] ?? razonSocial).slice(0, 3).toUpperCase();
-}
-
-function unlinkedAmountPen(lines: PaymentLineRow[]): number {
-  let total = 0;
-  for (const line of lines) {
-    if (
-      line.line_type === PAYMENT_LINE_TYPE.general &&
-      line.outgoing_invoice_id == null &&
-      line.incoming_invoice_id == null &&
-      line.loan_id == null
-    ) {
-      total += Math.abs(Number(line.amount_pen));
-    }
-  }
-  return Math.round(total * 100) / 100;
 }
 
 export function PaymentRow({ payment, banksById, contactsById }: Props) {

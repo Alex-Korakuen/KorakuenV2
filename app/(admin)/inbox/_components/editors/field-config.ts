@@ -60,15 +60,6 @@ export const HEADER_FIELD_EDITORS = {
 
 export const LINE_FIELD_EDITORS = {
   amount: { kind: "input", inputType: "number", placeholder: "0.00" },
-  line_type: {
-    kind: "enum",
-    options: [
-      ["invoice", "factura"],
-      ["bank_fee", "bank_fee"],
-      ["detraction", "detracción"],
-      ["general", "general"],
-    ],
-  },
   invoice_number_hint: { kind: "combobox", source: "invoices" },
   cost_category_label: { kind: "combobox", source: "costCategories" },
   description: { kind: "input", inputType: "text" },

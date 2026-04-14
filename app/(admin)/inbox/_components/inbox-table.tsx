@@ -65,18 +65,6 @@ function totalLines(lines: PaymentSubmissionLine[]): number {
   );
 }
 
-function lineTypePillClasses(t: PaymentSubmissionLine["line_type"]): string {
-  if (t === "invoice")
-    return "bg-blue-50 text-blue-700 border border-blue-200";
-  if (t === "bank_fee")
-    return "bg-stone-100 text-stone-600 border border-stone-200";
-  if (t === "detraction")
-    return "bg-amber-50 text-amber-700 border border-amber-200";
-  if (t === "loan")
-    return "bg-purple-50 text-purple-700 border border-purple-200";
-  return "bg-stone-100 text-stone-600 border border-stone-200";
-}
-
 export function InboxTable({
   submissions,
   bankAccounts,
@@ -687,7 +675,6 @@ function DetailPanel({
               <col className="w-10" />
               <col className="w-20" />
               <col className="w-24" />
-              <col className="w-28" />
               <col />
               <col className="w-36" />
               <col className="w-32" />
@@ -709,7 +696,6 @@ function DetailPanel({
                 // they save on selection.
                 const lineCellOrder = [
                   cid("amount"),
-                  cid("line_type"),
                   cid("description"),
                   cid("cost_category_label"),
                   cid("invoice_number_hint"),
@@ -767,30 +753,6 @@ function DetailPanel({
                             kind: "set_line",
                             index: i,
                             field: "amount",
-                            value: next,
-                          })
-                        }
-                      />
-                    </td>
-                    {/* Line type */}
-                    <td className="px-3 py-2">
-                      <EditableCell
-                        {...editProps}
-                        cellId={cid("line_type")}
-                        config={LINE_FIELD_EDITORS.line_type}
-                        value={line.line_type}
-                        display={
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${lineTypePillClasses(line.line_type)}`}
-                          >
-                            {line.line_type ?? "—"}
-                          </span>
-                        }
-                        onSave={(next) =>
-                          onCellPatch(cid("line_type"), {
-                            kind: "set_line",
-                            index: i,
-                            field: "line_type",
                             value: next,
                           })
                         }
@@ -938,7 +900,7 @@ function DetailPanel({
               {!readOnly ? (
                 <tr className="border-t border-border bg-background">
                   <td className="w-8 px-3 py-2" />
-                  <td colSpan={9} />
+                  <td colSpan={8} />
                   <td className="px-3 py-2 text-right">
                     <button
                       type="button"

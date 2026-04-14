@@ -27,7 +27,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { formatPEN, formatDate } from "@/lib/format";
-import { PAYMENT_DIRECTION, PAYMENT_LINE_TYPE } from "@/lib/types";
+import { PAYMENT_DIRECTION } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
   deletePayment,
@@ -38,9 +38,9 @@ import {
 import type {
   BankAccountRow,
   ContactRow,
-  PaymentLineRow,
 } from "@/lib/types";
 import type { PaymentWithLinesAndComputed } from "@/app/actions/payments";
+import { lineIsUnlinked } from "@/lib/payment-lines";
 import { toast } from "sonner";
 import { LinkInvoiceDialog } from "./link-invoice-dialog";
 import { CreateExpectedInvoiceDialog } from "./create-expected-invoice-dialog";
@@ -53,38 +53,6 @@ type Props = {
   contraparte: ContactRow | undefined;
   partnerContact: ContactRow | undefined;
 };
-
-const LINE_TYPE_PILL: Record<number, { label: string; className: string }> = {
-  [PAYMENT_LINE_TYPE.invoice]: {
-    label: "Factura",
-    className: "bg-sky-50 text-sky-700",
-  },
-  [PAYMENT_LINE_TYPE.detraction]: {
-    label: "Detracción",
-    className: "bg-indigo-50 text-indigo-700",
-  },
-  [PAYMENT_LINE_TYPE.bank_fee]: {
-    label: "Comisión",
-    className: "bg-stone-100 text-stone-700",
-  },
-  [PAYMENT_LINE_TYPE.loan]: {
-    label: "Préstamo",
-    className: "bg-violet-50 text-violet-700",
-  },
-  [PAYMENT_LINE_TYPE.general]: {
-    label: "General",
-    className: "bg-amber-50 text-amber-700",
-  },
-};
-
-function lineIsUnlinked(line: PaymentLineRow): boolean {
-  return (
-    line.line_type === PAYMENT_LINE_TYPE.general &&
-    line.outgoing_invoice_id == null &&
-    line.incoming_invoice_id == null &&
-    line.loan_id == null
-  );
-}
 
 export function PaymentDetailDialog({
   open,
@@ -309,7 +277,6 @@ export function PaymentDetailDialog({
                   <colgroup>
                     <col style={{ width: "32px" }} />
                     <col />
-                    <col style={{ width: "110px" }} />
                     <col style={{ width: "120px" }} />
                     <col style={{ width: "54px" }} />
                     <col style={{ width: "76px" }} />
@@ -321,9 +288,6 @@ export function PaymentDetailDialog({
                       </th>
                       <th className="text-left px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                         Descripción
-                      </th>
-                      <th className="text-left px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                        Tipo
                       </th>
                       <th className="text-right px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                         Monto
@@ -337,14 +301,11 @@ export function PaymentDetailDialog({
                   <tbody>
                     {sortedLines.map((line, idx) => {
                       const unlinked = lineIsUnlinked(line);
-                      const pill =
-                        LINE_TYPE_PILL[line.line_type] ??
-                        LINE_TYPE_PILL[PAYMENT_LINE_TYPE.general];
                       const isLinkedInvoice =
-                        line.line_type === PAYMENT_LINE_TYPE.invoice ||
                         line.outgoing_invoice_id != null ||
-                        line.incoming_invoice_id != null ||
-                        line.loan_id != null;
+                        line.incoming_invoice_id != null;
+                      const isLinkedLoan = line.loan_id != null;
+                      const hasAnyLink = isLinkedInvoice || isLinkedLoan;
                       return (
                         <tr
                           key={line.id}
@@ -359,16 +320,6 @@ export function PaymentDetailDialog({
                               {line.description ?? "—"}
                             </p>
                           </td>
-                          <td className="px-3 py-2">
-                            <span
-                              className={cn(
-                                "inline-flex h-5 items-center rounded px-1.5 text-[10px] font-medium",
-                                pill.className,
-                              )}
-                            >
-                              {pill.label}
-                            </span>
-                          </td>
                           <td className="px-3 py-2 text-right tabular-nums font-mono text-sm whitespace-nowrap">
                             {Number(line.amount).toLocaleString("es-PE", {
                               minimumFractionDigits: 2,
@@ -376,7 +327,7 @@ export function PaymentDetailDialog({
                             })}
                           </td>
                           <td className="px-2 py-2 text-center">
-                            {isLinkedInvoice ? (
+                            {hasAnyLink ? (
                               <Check className="inline h-3.5 w-3.5 text-emerald-600" />
                             ) : unlinked ? (
                               <span className="text-[11px] text-amber-700">✗</span>
@@ -409,7 +360,7 @@ export function PaymentDetailDialog({
                                     <FileClock className="h-3 w-3" />
                                   </button>
                                 </>
-                              ) : line.line_type === PAYMENT_LINE_TYPE.invoice ? (
+                              ) : isLinkedInvoice ? (
                                 <button
                                   type="button"
                                   onClick={() => handleUnlink(line.id)}
@@ -432,7 +383,7 @@ export function PaymentDetailDialog({
                       style={{ borderTop: "1px solid var(--border)" }}
                     >
                       <td
-                        colSpan={3}
+                        colSpan={2}
                         className="px-3 py-2 text-[11px] text-muted-foreground"
                       >
                         Suma de líneas
