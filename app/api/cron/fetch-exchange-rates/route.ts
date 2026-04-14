@@ -2,7 +2,7 @@
  * Daily Vercel Cron job that fetches the official USD/PEN exchange rate
  * from BCRP and stores it in exchange_rates.
  *
- * Schedule: see vercel.json — `0 14 * * *` (14:00 UTC = 09:00 Lima time).
+ * Schedule: see vercel.json — `0 17 * * *` (17:00 UTC = 12:00 Lima time).
  * The route runs every day; weekends are skipped internally.
  *
  * Auth: protected by CRON_SECRET. Vercel Cron sends the header
