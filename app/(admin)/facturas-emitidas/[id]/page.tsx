@@ -4,7 +4,6 @@ import { notFound } from "next/navigation";
 import { getOutgoingInvoice } from "@/app/actions/outgoing-invoices";
 import { getProject } from "@/app/actions/projects";
 import { TopBar } from "@/components/app-shell/top-bar";
-import { ExchangeRateChip } from "@/components/app-shell/exchange-rate-chip";
 import { OutgoingInvoiceForm } from "../_components/outgoing-invoice-form";
 
 type Props = {
@@ -32,7 +31,6 @@ export default async function FacturaEmitidaDetailPage({ params }: Props) {
             Facturas emitidas
           </Link>
         }
-        right={<ExchangeRateChip />}
       />
       <OutgoingInvoiceForm
         invoice={invoice}

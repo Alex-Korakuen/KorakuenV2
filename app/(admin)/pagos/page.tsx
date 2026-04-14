@@ -4,7 +4,6 @@ import { getPayments } from "@/app/actions/payments";
 import { getBankAccounts } from "@/app/actions/bank-accounts";
 import { getContacts } from "@/app/actions/contacts";
 import { TopBar } from "@/components/app-shell/top-bar";
-import { ExchangeRateChip } from "@/components/app-shell/exchange-rate-chip";
 import { Button } from "@/components/ui/button";
 import { formatPEN } from "@/lib/format";
 import { PAYMENT_DIRECTION } from "@/lib/types";
@@ -67,15 +66,12 @@ export default async function PagosPage({ searchParams }: Props) {
           </span>
         }
         right={
-          <div className="flex items-center gap-4">
-            <NewPaymentDialog>
-              <Button size="sm" className="gap-1.5">
-                <Plus className="h-3.5 w-3.5" />
-                Nuevo pago
-              </Button>
-            </NewPaymentDialog>
-            <ExchangeRateChip />
-          </div>
+          <NewPaymentDialog>
+            <Button size="sm" className="gap-1.5">
+              <Plus className="h-3.5 w-3.5" />
+              Nuevo pago
+            </Button>
+          </NewPaymentDialog>
         }
       />
 

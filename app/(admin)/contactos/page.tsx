@@ -2,7 +2,6 @@ import Link from "next/link";
 import { Plus } from "lucide-react";
 import { getContacts } from "@/app/actions/contacts";
 import { TopBar } from "@/components/app-shell/top-bar";
-import { ExchangeRateChip } from "@/components/app-shell/exchange-rate-chip";
 import { Button } from "@/components/ui/button";
 import { ContactLookupDialog } from "./_components/contact-lookup-dialog";
 
@@ -36,15 +35,12 @@ export default async function ContactosPage({ searchParams }: Props) {
       <TopBar
         left={<span className="text-sm font-medium text-muted-foreground">Contactos</span>}
         right={
-          <div className="flex items-center gap-4">
-            <ContactLookupDialog>
-              <Button size="sm" className="gap-1.5">
-                <Plus className="h-3.5 w-3.5" />
-                Nuevo contacto
-              </Button>
-            </ContactLookupDialog>
-            <ExchangeRateChip />
-          </div>
+          <ContactLookupDialog>
+            <Button size="sm" className="gap-1.5">
+              <Plus className="h-3.5 w-3.5" />
+              Nuevo contacto
+            </Button>
+          </ContactLookupDialog>
         }
       />
 

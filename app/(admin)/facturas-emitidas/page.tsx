@@ -4,7 +4,6 @@ import { getOutgoingInvoices } from "@/app/actions/outgoing-invoices";
 import { getProjects } from "@/app/actions/projects";
 import { getContacts } from "@/app/actions/contacts";
 import { TopBar } from "@/components/app-shell/top-bar";
-import { ExchangeRateChip } from "@/components/app-shell/exchange-rate-chip";
 import { Button } from "@/components/ui/button";
 import { formatPEN, formatDate } from "@/lib/format";
 import { OUTGOING_INVOICE_STATUS } from "@/lib/types";
@@ -103,15 +102,12 @@ export default async function FacturasEmitidasPage({ searchParams }: Props) {
           </span>
         }
         right={
-          <div className="flex items-center gap-4">
-            <OutgoingInvoiceDialog>
-              <Button size="sm" className="gap-1.5">
-                <Plus className="h-3.5 w-3.5" />
-                Nueva factura
-              </Button>
-            </OutgoingInvoiceDialog>
-            <ExchangeRateChip />
-          </div>
+          <OutgoingInvoiceDialog>
+            <Button size="sm" className="gap-1.5">
+              <Plus className="h-3.5 w-3.5" />
+              Nueva factura
+            </Button>
+          </OutgoingInvoiceDialog>
         }
       />
 

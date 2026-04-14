@@ -3,7 +3,6 @@ import { Plus, Search } from "lucide-react";
 import { getProjects } from "@/app/actions/projects";
 import { getProjectSummary } from "@/app/actions/reports";
 import { TopBar } from "@/components/app-shell/top-bar";
-import { ExchangeRateChip } from "@/components/app-shell/exchange-rate-chip";
 import { Button } from "@/components/ui/button";
 import { formatPEN, formatUSD } from "@/lib/format";
 import { PROJECT_STATUS } from "@/lib/types";
@@ -67,15 +66,12 @@ export default async function ProyectosPage({ searchParams }: Props) {
           </span>
         }
         right={
-          <div className="flex items-center gap-4">
-            <ProjectCreateDialog>
-              <Button size="sm" className="gap-1.5">
-                <Plus className="h-3.5 w-3.5" />
-                Nuevo proyecto
-              </Button>
-            </ProjectCreateDialog>
-            <ExchangeRateChip />
-          </div>
+          <ProjectCreateDialog>
+            <Button size="sm" className="gap-1.5">
+              <Plus className="h-3.5 w-3.5" />
+              Nuevo proyecto
+            </Button>
+          </ProjectCreateDialog>
         }
       />
 

@@ -1,10 +1,13 @@
-import { checkExchangeRateHealth } from "@/lib/exchange-rate";
+"use client";
+
 import { cn } from "@/lib/utils";
 
-export async function ExchangeRateChip() {
-  const health = await checkExchangeRateHealth();
-  const ok = health.ok && health.last_rate_promedio !== null;
+type Props = {
+  ok: boolean;
+  rate: number | null;
+};
 
+export function ExchangeRateChip({ ok, rate }: Props) {
   return (
     <div className="flex items-center gap-1.5 text-xs text-stone-400">
       <span
@@ -14,9 +17,7 @@ export async function ExchangeRateChip() {
         )}
       />
       <span>
-        {ok && health.last_rate_promedio
-          ? `USD/PEN S/ ${health.last_rate_promedio.toFixed(4)}`
-          : "USD/PEN no disponible"}
+        {ok && rate ? `USD/PEN S/ ${rate.toFixed(4)}` : "USD/PEN no disponible"}
       </span>
     </div>
   );

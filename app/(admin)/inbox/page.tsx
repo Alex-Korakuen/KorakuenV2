@@ -4,7 +4,6 @@ import { getBankAccounts } from "@/app/actions/bank-accounts";
 import { getProjects } from "@/app/actions/projects";
 import { getCostCategories } from "@/app/actions/project-budgets";
 import { TopBar } from "@/components/app-shell/top-bar";
-import { ExchangeRateChip } from "@/components/app-shell/exchange-rate-chip";
 import { Button } from "@/components/ui/button";
 import { SUBMISSION_STATUS } from "@/lib/types";
 import { InboxFilters } from "./_components/inbox-filters";
@@ -77,15 +76,12 @@ export default async function InboxPage({ searchParams }: Props) {
           </span>
         }
         right={
-          <div className="flex items-center gap-4">
-            <ImportCsvDialog>
-              <Button size="sm" className="gap-1.5">
-                <Upload className="h-3.5 w-3.5" />
-                Importar CSV
-              </Button>
-            </ImportCsvDialog>
-            <ExchangeRateChip />
-          </div>
+          <ImportCsvDialog>
+            <Button size="sm" className="gap-1.5">
+              <Upload className="h-3.5 w-3.5" />
+              Importar CSV
+            </Button>
+          </ImportCsvDialog>
         }
       />
 

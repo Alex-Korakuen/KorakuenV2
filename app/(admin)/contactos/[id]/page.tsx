@@ -3,7 +3,6 @@ import { ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 import { getContact, getContactHistorial } from "@/app/actions/contacts";
 import { TopBar } from "@/components/app-shell/top-bar";
-import { ExchangeRateChip } from "@/components/app-shell/exchange-rate-chip";
 import { MetadataCard } from "./_components/metadata-card";
 import { NotesSection } from "./_components/notes-section";
 import { HistorialSection } from "./_components/historial-section";
@@ -36,7 +35,6 @@ export default async function ContactDetailPage({ params }: Props) {
             Contactos
           </Link>
         }
-        right={<ExchangeRateChip />}
       />
 
       <div className="px-8 py-8">

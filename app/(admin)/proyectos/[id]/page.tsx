@@ -12,7 +12,6 @@ import {
 } from "@/app/actions/project-budgets";
 import { getContacts } from "@/app/actions/contacts";
 import { TopBar } from "@/components/app-shell/top-bar";
-import { ExchangeRateChip } from "@/components/app-shell/exchange-rate-chip";
 import { formatPEN, formatDate } from "@/lib/format";
 import { PROJECT_STATUS } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -116,12 +115,7 @@ export default async function ProjectDetailPage({ params }: Props) {
             Proyectos
           </Link>
         }
-        right={
-          <div className="flex items-center gap-4">
-            <LifecycleAction project={project} />
-            <ExchangeRateChip />
-          </div>
-        }
+        right={<LifecycleAction project={project} />}
       />
 
       <div className="px-8 py-8">

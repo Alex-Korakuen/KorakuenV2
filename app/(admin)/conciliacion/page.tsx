@@ -4,7 +4,6 @@ import { getPayments } from "@/app/actions/payments";
 import { getBankAccounts } from "@/app/actions/bank-accounts";
 import { getContacts } from "@/app/actions/contacts";
 import { TopBar } from "@/components/app-shell/top-bar";
-import { ExchangeRateChip } from "@/components/app-shell/exchange-rate-chip";
 import { formatPEN, formatDate } from "@/lib/format";
 import { BankAccountSelect } from "./_components/bank-account-select";
 import { ReconcileRow } from "./_components/reconcile-row";
@@ -111,7 +110,6 @@ export default async function ConciliacionPage({ searchParams }: Props) {
             />
           </div>
         }
-        right={<ExchangeRateChip />}
       />
 
       <div className="max-w-6xl px-8 py-8">

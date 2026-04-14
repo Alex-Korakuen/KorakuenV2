@@ -1,7 +1,6 @@
 import { getProjects } from "@/app/actions/projects";
 import { getSettlement } from "@/app/actions/reports";
 import { TopBar } from "@/components/app-shell/top-bar";
-import { ExchangeRateChip } from "@/components/app-shell/exchange-rate-chip";
 import { formatPEN } from "@/lib/format";
 import { ProjectMultiSelect } from "./_components/project-multi-select";
 import type { Settlement } from "@/app/actions/reports";
@@ -104,7 +103,6 @@ export default async function ReportesPage({ searchParams }: Props) {
             />
           </div>
         }
-        right={<ExchangeRateChip />}
       />
 
       <div className="max-w-5xl px-8 py-8">
