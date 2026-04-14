@@ -60,6 +60,8 @@ export function PaymentRow({ payment, banksById, contactsById }: Props) {
   const contraparte = payment.contact_id
     ? contactsById.get(payment.contact_id)
     : undefined;
+  const lineCount = payment.lines.length;
+  const hasMultipleLines = lineCount > 1;
 
   return (
     <>
@@ -80,9 +82,17 @@ export function PaymentRow({ payment, banksById, contactsById }: Props) {
           </span>
         </td>
         <td className="px-3 py-3">
-          <p className="text-sm truncate text-foreground">
-            {payment.title ?? "—"}
-          </p>
+          <div className="flex items-center gap-2 min-w-0">
+            <p className="text-sm truncate text-foreground">
+              {payment.title ?? "—"}
+            </p>
+            {hasMultipleLines && (
+              <span className="inline-flex items-center gap-0.5 shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                {lineCount} líneas
+                <span className="opacity-60">▸</span>
+              </span>
+            )}
+          </div>
         </td>
         <td className="px-3 py-3 font-mono text-xs text-muted-foreground">
           {payment.bank_reference ?? "—"}

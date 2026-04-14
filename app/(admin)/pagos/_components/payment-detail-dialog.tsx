@@ -115,6 +115,12 @@ export function PaymentDetailDialog({
   const matches =
     Math.abs(roundedLinesTotal - Number(payment.total_amount_pen)) < 0.01;
 
+  const unlinkedPen = sortedLines.reduce(
+    (acc, l) => (lineIsUnlinked(l) ? acc + Math.abs(Number(l.amount_pen)) : acc),
+    0,
+  );
+  const roundedUnlinked = Math.round(unlinkedPen * 100) / 100;
+
   function handleReconcileToggle() {
     startTransition(async () => {
       const result = payment.reconciled
@@ -167,31 +173,42 @@ export function PaymentDetailDialog({
           </DialogTitle>
 
           {/* Header */}
-          <div className="flex items-center gap-3 px-6 py-4 border-b border-border">
-            <span
-              className={cn(
-                "inline-flex h-6 items-center rounded-full px-2 text-[11px] font-medium gap-1",
-                isInbound
-                  ? "bg-emerald-50 text-emerald-700"
-                  : "bg-amber-50 text-amber-700",
-              )}
-            >
-              {isInbound ? (
-                <ArrowDownLeft className="h-3 w-3" />
-              ) : (
-                <ArrowUpRight className="h-3 w-3" />
-              )}
-              {isInbound ? "Entrada" : "Salida"}
-            </span>
-            <h3 className="flex-1 min-w-0 text-base font-semibold text-foreground truncate">
-              {payment.title ?? "Pago sin título"}
-            </h3>
+          <div className="flex items-start gap-3 px-6 py-4 border-b border-border">
+            <div className="flex-1 min-w-0">
+              <h3 className="text-base font-semibold text-foreground truncate">
+                {payment.title ?? "Pago sin título"}
+              </h3>
+              <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                <span className="inline-flex items-center gap-1">
+                  {isInbound ? (
+                    <ArrowDownLeft className="h-3 w-3 text-emerald-700" />
+                  ) : (
+                    <ArrowUpRight className="h-3 w-3 text-amber-700" />
+                  )}
+                  {isInbound ? "Entrada" : "Salida"}
+                </span>
+                <span className="text-muted-foreground/40">·</span>
+                <span>{formatDate(payment.payment_date)}</span>
+                {partnerContact && (
+                  <>
+                    <span className="text-muted-foreground/40">·</span>
+                    <span>{partnerContact.razon_social}</span>
+                  </>
+                )}
+                {contraparte && (
+                  <>
+                    <span className="text-muted-foreground/40">·</span>
+                    <span className="truncate">{contraparte.razon_social}</span>
+                  </>
+                )}
+              </div>
+            </div>
             <button
               type="button"
               onClick={handleReconcileToggle}
               disabled={pending}
               className={cn(
-                "inline-flex h-7 items-center rounded-full px-3 text-[11px] font-medium transition-colors",
+                "shrink-0 inline-flex h-7 items-center rounded-full px-3 text-[11px] font-medium transition-colors",
                 payment.reconciled
                   ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                   : "bg-stone-100 text-muted-foreground hover:bg-stone-200",
@@ -209,59 +226,77 @@ export function PaymentDetailDialog({
             <button
               type="button"
               onClick={() => setConfirmDelete(true)}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/40 hover:text-destructive hover:bg-stone-100"
+              className="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/40 hover:text-destructive hover:bg-stone-100"
               title="Eliminar pago"
             >
               <Trash2 className="h-3.5 w-3.5" />
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-6 py-5">
-            {/* Metadata row */}
+          <div className="flex-1 overflow-y-auto">
+            {/* Stats strip — mirrors the list row meta */}
             <div
-              className="rounded-lg bg-background px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs"
-              style={{ border: "1px solid var(--border)" }}
+              className="grid grid-cols-4 gap-0 px-6 py-4 bg-background/50"
+              style={{ borderBottom: "1px solid var(--border)" }}
             >
-              <Meta label="Fecha" value={formatDate(payment.payment_date)} />
-              <Meta
-                label="Banco"
-                value={
-                  bank
-                    ? `${bank.name}${bank.account_number ? ` ···· ${bank.account_number.slice(-4)}` : ""}`
-                    : "—"
-                }
-              />
-              <Meta
+              <Stat
                 label="Código"
                 value={
-                  <span className="font-mono">
+                  <span className="font-mono text-[12px]">
                     {payment.bank_reference ?? "—"}
                   </span>
                 }
               />
-              <Meta
-                label="Moneda"
+              <Stat
+                label="Banco"
                 value={
-                  <>
-                    {payment.currency}{" "}
-                    <span className={cn("tabular-nums font-medium", amountColor)}>
-                      {sign} {Number(payment.total_amount).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  </>
+                  bank ? (
+                    <>
+                      {bank.name}
+                      {bank.account_number && (
+                        <span className="text-muted-foreground">
+                          {" "}···· {bank.account_number.slice(-4)}
+                        </span>
+                      )}
+                    </>
+                  ) : payment.bank_account_id == null ? (
+                    <span className="italic text-muted-foreground">Off-book</span>
+                  ) : (
+                    "—"
+                  )
                 }
               />
-              {contraparte && (
-                <Meta label="Contraparte" value={contraparte.razon_social} />
-              )}
-              {partnerContact && (
-                <Meta label="Socio" value={partnerContact.razon_social} />
-              )}
+              <Stat
+                label="Total"
+                value={
+                  <span className={cn("tabular-nums", amountColor)}>
+                    {sign}{" "}
+                    {payment.currency !== "PEN" && `${payment.currency} `}
+                    {Number(payment.total_amount).toLocaleString("es-PE", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
+                }
+              />
+              <Stat
+                label="Sin vincular"
+                value={
+                  roundedUnlinked > 0 ? (
+                    <span className="tabular-nums text-amber-700">
+                      {formatPEN(roundedUnlinked)}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground/50">—</span>
+                  )
+                }
+              />
             </div>
 
             {/* Lines */}
-            <div className="mt-4">
-              <h4 className="mb-2 text-xs font-medium text-muted-foreground">
-                Líneas del pago
+            <div className="px-6 py-5">
+              <h4 className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                Líneas · {sortedLines.length}
               </h4>
               <div
                 className="rounded-lg bg-card overflow-hidden"
@@ -272,37 +307,58 @@ export function PaymentDetailDialog({
                   style={{ tableLayout: "fixed" }}
                 >
                   <colgroup>
-                    <col style={{ width: "90px" }} />
+                    <col style={{ width: "32px" }} />
                     <col />
                     <col style={{ width: "110px" }} />
-                    <col style={{ width: "110px" }} />
+                    <col style={{ width: "120px" }} />
+                    <col style={{ width: "54px" }} />
+                    <col style={{ width: "76px" }} />
                   </colgroup>
                   <thead>
                     <tr className="bg-background">
+                      <th className="text-right px-2 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                        #
+                      </th>
+                      <th className="text-left px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                        Descripción
+                      </th>
                       <th className="text-left px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                         Tipo
                       </th>
-                      <th className="text-left px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                        Detalle
-                      </th>
                       <th className="text-right px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                         Monto
+                      </th>
+                      <th className="text-center px-2 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                        Vinc.
                       </th>
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedLines.map((line) => {
+                    {sortedLines.map((line, idx) => {
                       const unlinked = lineIsUnlinked(line);
                       const pill =
                         LINE_TYPE_PILL[line.line_type] ??
                         LINE_TYPE_PILL[PAYMENT_LINE_TYPE.general];
+                      const isLinkedInvoice =
+                        line.line_type === PAYMENT_LINE_TYPE.invoice ||
+                        line.outgoing_invoice_id != null ||
+                        line.incoming_invoice_id != null ||
+                        line.loan_id != null;
                       return (
                         <tr
                           key={line.id}
                           style={{ borderTop: "1px solid var(--border)" }}
                           className={unlinked ? "bg-amber-50/40" : ""}
                         >
+                          <td className="px-2 py-2 text-right tabular-nums text-[11px] text-muted-foreground/60">
+                            {idx + 1}
+                          </td>
+                          <td className="px-3 py-2 overflow-hidden">
+                            <p className="truncate text-sm text-foreground">
+                              {line.description ?? "—"}
+                            </p>
+                          </td>
                           <td className="px-3 py-2">
                             <span
                               className={cn(
@@ -313,16 +369,20 @@ export function PaymentDetailDialog({
                               {pill.label}
                             </span>
                           </td>
-                          <td className="px-3 py-2 overflow-hidden">
-                            <p className="truncate text-sm text-foreground">
-                              {line.description ?? "—"}
-                            </p>
-                          </td>
                           <td className="px-3 py-2 text-right tabular-nums font-mono text-sm whitespace-nowrap">
                             {Number(line.amount).toLocaleString("es-PE", {
                               minimumFractionDigits: 2,
                               maximumFractionDigits: 2,
                             })}
+                          </td>
+                          <td className="px-2 py-2 text-center">
+                            {isLinkedInvoice ? (
+                              <Check className="inline h-3.5 w-3.5 text-emerald-600" />
+                            ) : unlinked ? (
+                              <span className="text-[11px] text-amber-700">✗</span>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground/40">—</span>
+                            )}
                           </td>
                           <td className="px-2 py-2">
                             <div className="flex items-center justify-end gap-1">
@@ -372,7 +432,7 @@ export function PaymentDetailDialog({
                       style={{ borderTop: "1px solid var(--border)" }}
                     >
                       <td
-                        colSpan={2}
+                        colSpan={3}
                         className="px-3 py-2 text-[11px] text-muted-foreground"
                       >
                         Suma de líneas
@@ -387,6 +447,7 @@ export function PaymentDetailDialog({
                           <span className="text-[10px] text-amber-700">≠</span>
                         )}
                       </td>
+                      <td></td>
                     </tr>
                   </tfoot>
                 </table>
@@ -443,7 +504,7 @@ export function PaymentDetailDialog({
   );
 }
 
-function Meta({
+function Stat({
   label,
   value,
 }: {
@@ -452,10 +513,10 @@ function Meta({
 }) {
   return (
     <div>
-      <p className="text-[10px] uppercase tracking-wider text-muted-foreground/60">
+      <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
         {label}
       </p>
-      <p className="text-xs text-foreground">{value}</p>
+      <p className="mt-1 text-[13px] font-medium text-foreground">{value}</p>
     </div>
   );
 }
