@@ -889,17 +889,11 @@ function DetailPanel({
                   </tr>
                 );
               })}
-              <tr className="border-t border-border bg-background">
-                <td className="w-8 px-3 py-2" />
-                <td className="px-3 py-2 text-[11px] uppercase tracking-wider text-muted-foreground">
-                  total
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums font-medium text-foreground">
-                  {totalLines(data.lines).toFixed(2)}
-                </td>
-                <td colSpan={7} />
-                <td className="px-3 py-2 text-right">
-                  {!readOnly ? (
+              {!readOnly ? (
+                <tr className="border-t border-border bg-background">
+                  <td className="w-8 px-3 py-2" />
+                  <td colSpan={9} />
+                  <td className="px-3 py-2 text-right">
                     <button
                       type="button"
                       onClick={onAddLine}
@@ -907,9 +901,9 @@ function DetailPanel({
                     >
                       <Plus className="h-3 w-3" /> Agregar línea
                     </button>
-                  ) : null}
-                </td>
-              </tr>
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
 
