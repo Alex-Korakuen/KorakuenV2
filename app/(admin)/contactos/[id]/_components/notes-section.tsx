@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { updateContact } from "@/app/actions/contacts";
 import { toast } from "sonner";
+import { Markdown } from "@/components/ui/markdown";
 
 type Props = {
   contactId: string;
@@ -97,9 +98,7 @@ export function NotesSection({ contactId, initialNotes }: Props) {
         </button>
       </div>
       {notes ? (
-        <div className="text-sm leading-relaxed text-foreground/80 whitespace-pre-wrap">
-          {notes}
-        </div>
+        <Markdown>{notes}</Markdown>
       ) : (
         <p className="text-sm text-muted-foreground/40">
           Sin notas. Haz clic para agregar.

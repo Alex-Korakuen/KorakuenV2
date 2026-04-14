@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { updateProject } from "@/app/actions/projects";
 import { toast } from "sonner";
+import { Markdown } from "@/components/ui/markdown";
 
 type Props = {
   projectId: string;
@@ -79,9 +80,7 @@ export function ProjectNotes({ projectId, initialNotes }: Props) {
             autoFocus
           />
         ) : notes ? (
-          <div className="flex-1 text-sm leading-relaxed text-foreground/80 whitespace-pre-wrap overflow-auto">
-            {notes}
-          </div>
+          <Markdown className="flex-1 overflow-auto" >{notes}</Markdown>
         ) : (
           <p className="flex-1 text-sm text-muted-foreground/40">
             Sin notas. Haz clic en Editar para agregar.
