@@ -1024,6 +1024,7 @@ async function buildCreatePaymentInputFromSubmission(
     payment_date: h.payment_date,
     bank_reference: h.bank_reference,
     title: h.title,
+    drive_file_id: h.drive_file_id,
     source: SOURCE.csv_import,
     submission_id: submissionId,
   };

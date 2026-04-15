@@ -48,6 +48,7 @@ export const CSV_HEADER_COLUMNS = [
   "invoice_number",
   "cost_category",
   "line_description",
+  "drive_file_id",
 ] as const;
 
 // Fields removed from the CSV in 2026-04-14:
@@ -59,6 +60,11 @@ export const CSV_HEADER_COLUMNS = [
 //   - contact_ruc: counterparty isn't an intake-time field. Invoice-linked
 //     lines carry the counterparty via the invoice FK chain; unlinked lines
 //     are informal / unknown. Can be filled post-approval if needed.
+//
+// Added on 2026-04-14:
+//   - drive_file_id: optional filename of the supporting document
+//     (e.g. "PRY001-PY-002.jpeg"). Header-level, inheritable (write once
+//     on the first row of a group; continuation rows can be blank).
 
 export type CsvColumn = (typeof CSV_HEADER_COLUMNS)[number];
 
@@ -77,6 +83,7 @@ export type RawCsvRow = {
   invoice_number: string;
   cost_category: string;
   line_description: string;
+  drive_file_id: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -137,6 +144,7 @@ export function parseCsvPaymentRows(
       invoice_number: (raw.invoice_number ?? "").toString(),
       cost_category: (raw.cost_category ?? "").toString(),
       line_description: (raw.line_description ?? "").toString(),
+      drive_file_id: (raw.drive_file_id ?? "").toString(),
     };
     return row;
   });
@@ -223,6 +231,7 @@ export function buildSubmissionFromGroup(
     project_code: first.project_code || null,
     project_id: null,
     title: first.title || null,
+    drive_file_id: first.drive_file_id || null,
   };
 
   const structuralErrors: SubmissionFieldError[] = [];
@@ -248,8 +257,10 @@ export function buildSubmissionFromGroup(
   // project_code is header-level by domain rule (one payment = one project)
   // but continuation rows may be left blank — that's the natural CSV shape
   // when a user writes the project once on row 1 and leaves it off subsequent
-  // lines. Blank inherits from the first row; non-blank must match.
-  const inheritableHeaderFields = ["project_code"] as const;
+  // lines. Blank inherits from the first row; non-blank must match. Same
+  // rule applies to drive_file_id: one supporting file per payment, naturally
+  // written once on row 1.
+  const inheritableHeaderFields = ["project_code", "drive_file_id"] as const;
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     for (const f of headerFields) {
@@ -621,6 +632,7 @@ export const HEADER_EDITABLE_FIELDS = [
   "partner_ruc",
   "project_code",
   "title",
+  "drive_file_id",
 ] as const;
 
 export type HeaderEditableField = (typeof HEADER_EDITABLE_FIELDS)[number];
@@ -786,6 +798,7 @@ function coerceHeaderValue(
     case "partner_ruc":
     case "project_code":
     case "title":
+    case "drive_file_id":
       return success(value == null ? null : String(value).trim() || null);
     case "currency": {
       const raw = value == null ? null : String(value).toUpperCase().trim();
@@ -929,5 +942,6 @@ function blankHeader(): PaymentSubmissionHeader {
     project_code: null,
     project_id: null,
     title: null,
+    drive_file_id: null,
   };
 }

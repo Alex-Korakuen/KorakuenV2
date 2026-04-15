@@ -797,6 +797,7 @@ export type CreatePaymentInput = {
   payment_date: string;
   bank_reference?: string | null;
   title?: string | null;
+  drive_file_id?: string | null;
   source?: number;
   submission_id?: string | null;
 };
@@ -886,6 +887,10 @@ export type PaymentSubmissionHeader = {
   project_id: string | null;
   // Payment-level memo / bank-statement description (maps to payments.title)
   title: string | null;
+  // Filename of the payment's supporting document (e.g. "PRY001-PY-002.jpeg").
+  // Stored in payments.drive_file_id — the column name is a historical
+  // carryover; the value is just a filename, not a Google Drive object id.
+  drive_file_id: string | null;
 };
 
 export type PaymentSubmissionLine = {

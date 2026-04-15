@@ -56,6 +56,11 @@ export const HEADER_FIELD_EDITORS = {
   partner_ruc: { kind: "input", inputType: "text", placeholder: "RUC del partner (opcional)" },
   project_code: { kind: "combobox", source: "projects" },
   title: { kind: "input", inputType: "text", placeholder: "texto del estado de cuenta" },
+  drive_file_id: {
+    kind: "input",
+    inputType: "text",
+    placeholder: "PRY001-PY-001.jpeg",
+  },
 } as const satisfies Record<string, EditorConfig>;
 
 export const LINE_FIELD_EDITORS = {
