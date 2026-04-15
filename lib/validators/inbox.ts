@@ -40,10 +40,7 @@ export const CSV_HEADER_COLUMNS = [
   "direction",
   "bank_account",
   "currency",
-  "exchange_rate",
   "bank_reference",
-  "is_detraction",
-  "contact_ruc",
   "partner_ruc",
   "title",
   "line_amount",
@@ -52,6 +49,16 @@ export const CSV_HEADER_COLUMNS = [
   "cost_category",
   "line_description",
 ] as const;
+
+// Fields removed from the CSV in 2026-04-14:
+//   - exchange_rate: always auto-resolved from the BCRP rate for the
+//     payment_date (USD rows). PEN ignores it. Manual overrides can be
+//     applied later via the inbox UI if the bank quoted a different rate.
+//   - is_detraction: derived from bank_account.account_type
+//     (2 = banco_de_la_nacion) at FK-resolution time.
+//   - contact_ruc: counterparty isn't an intake-time field. Invoice-linked
+//     lines carry the counterparty via the invoice FK chain; unlinked lines
+//     are informal / unknown. Can be filled post-approval if needed.
 
 export type CsvColumn = (typeof CSV_HEADER_COLUMNS)[number];
 
@@ -62,10 +69,7 @@ export type RawCsvRow = {
   direction: string;
   bank_account: string;
   currency: string;
-  exchange_rate: string;
   bank_reference: string;
-  is_detraction: string;
-  contact_ruc: string;
   partner_ruc: string;
   title: string;
   line_amount: string;
@@ -125,10 +129,7 @@ export function parseCsvPaymentRows(
       direction: (raw.direction ?? "").toString(),
       bank_account: (raw.bank_account ?? "").toString(),
       currency: (raw.currency ?? "").toString(),
-      exchange_rate: (raw.exchange_rate ?? "").toString(),
       bank_reference: (raw.bank_reference ?? "").toString(),
-      is_detraction: (raw.is_detraction ?? "").toString(),
-      contact_ruc: (raw.contact_ruc ?? "").toString(),
       partner_ruc: (raw.partner_ruc ?? "").toString(),
       title: (raw.title ?? "").toString(),
       line_amount: (raw.line_amount ?? "").toString(),
@@ -207,10 +208,15 @@ export function buildSubmissionFromGroup(
     bank_account_label: first.bank_account || null,
     bank_account_id: null,
     currency: normalizeCurrency(first.currency),
-    exchange_rate: parseNumberOrNull(first.exchange_rate),
+    // exchange_rate auto-resolves from BCRP at approval time (USD only).
+    exchange_rate: null,
     bank_reference: first.bank_reference || null,
-    is_detraction: parseBoolean(first.is_detraction),
-    contact_ruc: first.contact_ruc || null,
+    // is_detraction derives from bank_account.account_type in
+    // resolveHeaderLabelsToIds once the bank account FK is resolved.
+    is_detraction: false,
+    // contact_ruc is not a CSV-intake field; counterparty comes from the
+    // linked invoice (or stays unknown = informal).
+    contact_ruc: null,
     contact_id: null,
     partner_ruc: first.partner_ruc || null,
     partner_id: null,
@@ -235,13 +241,15 @@ export function buildSubmissionFromGroup(
     "direction",
     "bank_account",
     "currency",
-    "exchange_rate",
     "bank_reference",
-    "is_detraction",
-    "contact_ruc",
     "partner_ruc",
     "title",
   ] as const;
+  // project_code is header-level by domain rule (one payment = one project)
+  // but continuation rows may be left blank — that's the natural CSV shape
+  // when a user writes the project once on row 1 and leaves it off subsequent
+  // lines. Blank inherits from the first row; non-blank must match.
+  const inheritableHeaderFields = ["project_code"] as const;
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     for (const f of headerFields) {
@@ -249,6 +257,15 @@ export function buildSubmissionFromGroup(
         structuralErrors.push({
           path: `header.${f}`,
           message: `La columna "${f}" difiere entre filas del mismo group_id (fila ${r.row_number} vs fila ${first.row_number})`,
+        });
+      }
+    }
+    for (const f of inheritableHeaderFields) {
+      const continuation = r[f].trim();
+      if (continuation !== "" && continuation !== first[f].trim()) {
+        structuralErrors.push({
+          path: `header.${f}`,
+          message: `La columna "${f}" difiere entre filas del mismo group_id (fila ${r.row_number} vs fila ${first.row_number}). Déjala en blanco en las filas de continuación o repite el mismo valor.`,
         });
       }
     }
@@ -465,6 +482,10 @@ type BankAccountRef = {
   id: string;
   name: string;
   account_number: string | null;
+  // 1 = regular, 2 = banco_de_la_nacion. Carried here so
+  // resolveHeaderLabelsToIds can derive `is_detraction` from the
+  // resolved bank account without a second DB hit.
+  account_type: number;
 };
 
 type ProjectRef = {
@@ -498,30 +519,33 @@ export function resolveHeaderLabelsToIds(
   const errors: SubmissionFieldError[] = [];
 
   // Bank account: exact name match → last-4-of-account-number fallback.
+  // Once resolved, is_detraction derives from bank_account.account_type
+  // (2 = banco_de_la_nacion). No bank account = no derivation; the flag
+  // stays at whatever the upstream parser set (false by default).
   if (header.bank_account_label) {
     const label = header.bank_account_label.trim();
     const byName = refs.bankAccounts.find(
       (b) => b.name.toLowerCase() === label.toLowerCase(),
     );
-    if (byName) {
-      header.bank_account_id = byName.id;
-    } else {
+    let resolved: BankAccountRef | undefined = byName;
+    if (!resolved) {
       const last4 = label.replace(/\D/g, "").slice(-4);
-      const byLast4 =
+      resolved =
         last4.length === 4
           ? refs.bankAccounts.find((b) =>
               (b.account_number ?? "").endsWith(last4),
             )
           : undefined;
-      if (byLast4) {
-        header.bank_account_id = byLast4.id;
-      } else {
-        header.bank_account_id = null;
-        errors.push({
-          path: "header.bank_account",
-          message: `Cuenta bancaria "${header.bank_account_label}" no encontrada`,
-        });
-      }
+    }
+    if (resolved) {
+      header.bank_account_id = resolved.id;
+      header.is_detraction = resolved.account_type === 2;
+    } else {
+      header.bank_account_id = null;
+      errors.push({
+        path: "header.bank_account",
+        message: `Cuenta bancaria "${header.bank_account_label}" no encontrada`,
+      });
     }
   } else {
     header.bank_account_id = null;

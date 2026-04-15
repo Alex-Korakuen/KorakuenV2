@@ -212,7 +212,7 @@ async function loadResolutionRefs(
   const [bankResult, projectResult, contactResult] = await Promise.all([
     supabase
       .from("bank_accounts")
-      .select("id, name, account_number")
+      .select("id, name, account_number, account_type")
       .is("deleted_at", null)
       .eq("is_active", true),
     supabase.from("projects").select("id, code").is("deleted_at", null),
@@ -257,6 +257,7 @@ async function loadResolutionRefs(
       id: string;
       name: string;
       account_number: string | null;
+      account_type: number;
     }>,
     projects: (projectResult.data ?? []) as Array<{
       id: string;
@@ -654,12 +655,10 @@ export async function approveSubmission(
       });
     }
   }
-  if (!header.contact_id) {
-    livenessErrors.push({
-      path: "header.contact_ruc",
-      message: "Contacto no resuelto",
-    });
-  } else {
+  // contact_id is optional: informal / unknown counterparties are a
+  // first-class case. Only run the liveness check when a contact was
+  // actually resolved — a null value is fine all the way through.
+  if (header.contact_id) {
     const contact = await fetchActiveById<ContactRow>(
       supabase,
       "contacts",

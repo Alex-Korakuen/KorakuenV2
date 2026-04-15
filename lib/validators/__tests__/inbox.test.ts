@@ -41,10 +41,15 @@ function makeCsv(rows: string[]): string {
 // parseCsvPaymentRows
 // ---------------------------------------------------------------------------
 
+// CSV column order (13 cols, as of 2026-04-14):
+// group_id,payment_date,direction,bank_account,currency,bank_reference,
+// partner_ruc,title,line_amount,project_code,invoice_number,cost_category,
+// line_description
+
 describe("parseCsvPaymentRows", () => {
   it("parses a minimal one-row CSV", () => {
     const csv = makeCsv([
-      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,,OP-445511,false,20512345678,,,11800.00,invoice,PRJ-2026-01,F001-00045,,",
+      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,OP-445511,,,11800.00,PRJ-2026-01,F001-00045,,",
     ]);
     const r = parseCsvPaymentRows(csv);
     expect(r.success).toBe(true);
@@ -56,7 +61,7 @@ describe("parseCsvPaymentRows", () => {
 
   it("trims whitespace on values", () => {
     const csv = makeCsv([
-      "  P001  ,2026-04-02, inbound , BCP-PEN-001 ,PEN,,OP-445511,false,20512345678,,,11800.00,invoice,PRJ-2026-01,F001-00045,,",
+      "  P001  ,2026-04-02, inbound , BCP-PEN-001 ,PEN,OP-445511,,,11800.00,PRJ-2026-01,F001-00045,,",
     ]);
     const r = parseCsvPaymentRows(csv);
     expect(r.success).toBe(true);
@@ -83,7 +88,7 @@ describe("parseCsvPaymentRows", () => {
   it("discards fully empty lines", () => {
     const csv = [
       CSV_HEADER,
-      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,,OP-445511,false,20512345678,,,11800.00,invoice,PRJ-2026-01,F001-00045,,",
+      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,OP-445511,,,11800.00,PRJ-2026-01,F001-00045,,",
       "",
       "",
     ].join("\n");
@@ -95,8 +100,8 @@ describe("parseCsvPaymentRows", () => {
 
   it("assigns row_number starting at 2 (accounting for header)", () => {
     const csv = makeCsv([
-      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,,OP-1,false,20512345678,,,11800.00,invoice,PRJ-2026-01,,,",
-      "P002,2026-04-03,outbound,BCP-PEN-001,PEN,,OP-2,false,20498765432,,,5900.00,invoice,PRJ-2026-01,,,",
+      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,OP-1,,,11800.00,PRJ-2026-01,,,",
+      "P002,2026-04-03,outbound,BCP-PEN-001,PEN,OP-2,,,5900.00,PRJ-2026-01,,,",
     ]);
     const r = parseCsvPaymentRows(csv);
     expect(r.success).toBe(true);
@@ -113,9 +118,9 @@ describe("parseCsvPaymentRows", () => {
 describe("groupRowsByGroupId", () => {
   it("groups rows sharing a group_id", () => {
     const csv = makeCsv([
-      "P001,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-1,false,20498765432,,,5900.00,invoice,PRJ-2026-01,F001-00089,,",
-      "P001,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-1,false,20498765432,,,12.50,bank_fee,,,,comision",
-      "P002,2026-04-03,inbound,BCP-PEN-001,PEN,,OP-2,false,20512345678,,,11800.00,invoice,PRJ-2026-01,F001-00090,,",
+      "P001,2026-04-02,outbound,BCP-PEN-001,PEN,TRF-1,,,5900.00,PRJ-2026-01,F001-00089,,",
+      "P001,2026-04-02,outbound,BCP-PEN-001,PEN,TRF-1,,,12.50,,,Comisiones bancarias,comision",
+      "P002,2026-04-03,inbound,BCP-PEN-001,PEN,OP-2,,,11800.00,PRJ-2026-01,F001-00090,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     expect(parsed.success).toBe(true);
@@ -128,9 +133,9 @@ describe("groupRowsByGroupId", () => {
 
   it("preserves first-occurrence order", () => {
     const csv = makeCsv([
-      "B,2026-04-02,inbound,BCP-PEN-001,PEN,,X,false,20512345678,,,100,invoice,,F001,,",
-      "A,2026-04-02,inbound,BCP-PEN-001,PEN,,Y,false,20512345678,,,100,invoice,,F002,,",
-      "B,2026-04-02,inbound,BCP-PEN-001,PEN,,X,false,20512345678,,,200,invoice,,F003,,",
+      "B,2026-04-02,inbound,BCP-PEN-001,PEN,X,,,100,,F001,,",
+      "A,2026-04-02,inbound,BCP-PEN-001,PEN,Y,,,100,,F002,,",
+      "B,2026-04-02,inbound,BCP-PEN-001,PEN,X,,,200,,F003,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -140,7 +145,7 @@ describe("groupRowsByGroupId", () => {
 
   it("collects missing group_ids under __missing__", () => {
     const csv = makeCsv([
-      ",2026-04-02,inbound,BCP-PEN-001,PEN,,OP-1,false,20512345678,,,100,invoice,,,,",
+      ",2026-04-02,inbound,BCP-PEN-001,PEN,OP-1,,,100,,,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -156,7 +161,7 @@ describe("groupRowsByGroupId", () => {
 describe("buildSubmissionFromGroup — happy paths", () => {
   it("builds a single-line inbound payment", () => {
     const csv = makeCsv([
-      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,,OP-445511,false,20512345678,,,11800.00,PRJ-2026-01,F001-00045,,",
+      "P001,2026-04-02,inbound,BCP-PEN-001,PEN,OP-445511,,,11800.00,PRJ-2026-01,F001-00045,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -168,7 +173,12 @@ describe("buildSubmissionFromGroup — happy paths", () => {
     expect(sub.header.direction).toBe("inbound");
     expect(sub.header.currency).toBe("PEN");
     expect(sub.header.bank_reference).toBe("OP-445511");
-    expect(sub.header.contact_ruc).toBe("20512345678");
+    // contact_ruc is no longer a CSV field — it defaults to null and is
+    // either filled via the linked invoice later or left unknown.
+    expect(sub.header.contact_ruc).toBeNull();
+    // exchange_rate and is_detraction are no longer in the CSV either.
+    expect(sub.header.exchange_rate).toBeNull();
+    expect(sub.header.is_detraction).toBe(false);
     expect(sub.lines).toHaveLength(1);
     expect(sub.lines[0].amount).toBe(11800);
     expect(sub.lines[0].invoice_number_hint).toBe("F001-00045");
@@ -177,9 +187,9 @@ describe("buildSubmissionFromGroup — happy paths", () => {
 
   it("builds a 3-line outbound payment with bank fee", () => {
     const csv = makeCsv([
-      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-998877,false,20498765432,,,5900.00,PRJ-2026-01,F001-00089,,",
-      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-998877,false,20498765432,,,12.50,,,Comisiones bancarias,comision",
-      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-998877,false,20498765432,,,100.00,PRJ-2026-01,,materiales,",
+      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,TRF-998877,,,5900.00,PRJ-2026-01,F001-00089,,",
+      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,TRF-998877,,,12.50,,,Comisiones bancarias,comision",
+      "P002,2026-04-02,outbound,BCP-PEN-001,PEN,TRF-998877,,,100.00,,,materiales,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -193,29 +203,18 @@ describe("buildSubmissionFromGroup — happy paths", () => {
     expect(sub.validation.valid).toBe(true);
   });
 
-  it("marks a USD payment with exchange_rate as valid", () => {
+  it("builds a USD payment with exchange_rate null (auto-resolved later)", () => {
     const csv = makeCsv([
-      "P003,2026-04-02,inbound,BCP-USD-001,USD,3.75,OP-5,false,20512345678,,,5000.00,PRJ-2026-01,F001-00050,,",
+      "P003,2026-04-02,inbound,BCP-USD-001,USD,OP-5,,,5000.00,PRJ-2026-01,F001-00050,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
     const groups = groupRowsByGroupId(parsed.data);
     const sub = buildSubmissionFromGroup("P003", groups.get("P003")!);
     expect(sub.header.currency).toBe("USD");
-    expect(sub.header.exchange_rate).toBe(3.75);
-    expect(sub.validation.valid).toBe(true);
-  });
-
-  it("marks a BN detraction as valid when currency=PEN", () => {
-    const csv = makeCsv([
-      "P004,2026-04-03,outbound,BN-DET-001,PEN,,DET-4411,true,20498765432,,,472.00,PRJ-2026-01,F001-00089,,",
-    ]);
-    const parsed = parseCsvPaymentRows(csv);
-    if (!parsed.success) throw new Error("parse failed");
-    const groups = groupRowsByGroupId(parsed.data);
-    const sub = buildSubmissionFromGroup("P004", groups.get("P004")!);
-    expect(sub.header.is_detraction).toBe(true);
-    expect(sub.header.currency).toBe("PEN");
+    expect(sub.header.exchange_rate).toBeNull();
+    // Validation still passes — the server action resolves the rate from
+    // BCRP at approval time.
     expect(sub.validation.valid).toBe(true);
   });
 });
@@ -227,8 +226,8 @@ describe("buildSubmissionFromGroup — happy paths", () => {
 describe("buildSubmissionFromGroup — structural errors", () => {
   it("flags inconsistent header across rows of a group", () => {
     const csv = makeCsv([
-      "P001,2026-04-02,outbound,BCP-PEN-001,PEN,,TRF-1,false,20498765432,,,5900.00,PRJ-2026-01,F001-00089,,",
-      "P001,2026-04-02,outbound,BCP-USD-001,PEN,,TRF-1,false,20498765432,,,12.50,,,,",
+      "P001,2026-04-02,outbound,BCP-PEN-001,PEN,TRF-1,,,5900.00,PRJ-2026-01,F001-00089,,",
+      "P001,2026-04-02,outbound,BCP-USD-001,PEN,TRF-1,,,12.50,,,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -242,7 +241,7 @@ describe("buildSubmissionFromGroup — structural errors", () => {
 
   it("flags missing group_id", () => {
     const csv = makeCsv([
-      ",2026-04-02,inbound,BCP-PEN-001,PEN,,OP-1,false,20512345678,,,100,,,,",
+      ",2026-04-02,inbound,BCP-PEN-001,PEN,OP-1,,,100,,,,",
     ]);
     const parsed = parseCsvPaymentRows(csv);
     if (!parsed.success) throw new Error("parse failed");
@@ -254,6 +253,39 @@ describe("buildSubmissionFromGroup — structural errors", () => {
     expect(sub.validation.valid).toBe(false);
     expect(
       sub.validation.errors.some((e) => e.path === "group_id"),
+    ).toBe(true);
+  });
+
+  it("accepts blank project_code on continuation rows (inherits from first row)", () => {
+    const csv = makeCsv([
+      "P010,2026-04-02,outbound,BCP-PEN-001,PEN,TRF-10,,,5900.00,PRJ-2026-01,F001-00089,,",
+      "P010,2026-04-02,outbound,BCP-PEN-001,PEN,TRF-10,,,12.50,,,Comisiones bancarias,comision",
+      "P010,2026-04-02,outbound,BCP-PEN-001,PEN,TRF-10,,,100.00,,,materiales,",
+    ]);
+    const parsed = parseCsvPaymentRows(csv);
+    if (!parsed.success) throw new Error("parse failed");
+    const groups = groupRowsByGroupId(parsed.data);
+    const sub = buildSubmissionFromGroup("P010", groups.get("P010")!);
+
+    expect(sub.header.project_code).toBe("PRJ-2026-01");
+    expect(
+      sub.validation.errors.some((e) => e.path === "header.project_code"),
+    ).toBe(false);
+  });
+
+  it("flags mismatched project_code on a continuation row", () => {
+    const csv = makeCsv([
+      "P011,2026-04-02,outbound,BCP-PEN-001,PEN,TRF-11,,,5900.00,PRJ-2026-01,F001-00089,,",
+      "P011,2026-04-02,outbound,BCP-PEN-001,PEN,TRF-11,,,12.50,PRJ-2026-02,,Comisiones bancarias,comision",
+    ]);
+    const parsed = parseCsvPaymentRows(csv);
+    if (!parsed.success) throw new Error("parse failed");
+    const groups = groupRowsByGroupId(parsed.data);
+    const sub = buildSubmissionFromGroup("P011", groups.get("P011")!);
+
+    expect(sub.validation.valid).toBe(false);
+    expect(
+      sub.validation.errors.some((e) => e.path === "header.project_code"),
     ).toBe(true);
   });
 });
@@ -530,8 +562,24 @@ function makeRefs(
 ): ResolutionRefs {
   return {
     bankAccounts: [
-      { id: "bank-pen-1", name: "BCP-PEN-001", account_number: "194-12345-0012" },
-      { id: "bank-usd-1", name: "BCP-USD-001", account_number: "194-67890-0099" },
+      {
+        id: "bank-pen-1",
+        name: "BCP-PEN-001",
+        account_number: "194-12345-0012",
+        account_type: 1, // regular
+      },
+      {
+        id: "bank-usd-1",
+        name: "BCP-USD-001",
+        account_number: "194-67890-0099",
+        account_type: 1, // regular
+      },
+      {
+        id: "bank-bn-1",
+        name: "BN-DETRACCION-001",
+        account_number: "00-11122233-44",
+        account_type: 2, // banco_de_la_nacion
+      },
     ],
     projects: [{ id: "proj-1", code: "PRJ-2026-01" }],
     contactsByRuc: new Map([
@@ -591,6 +639,29 @@ describe("resolveHeaderLabelsToIds", () => {
     // No error — it's the action layer's job to handle SUNAT fallback.
     expect(errs.length).toBe(0);
     expect(h.contact_id).toBeNull();
+  });
+
+  it("derives is_detraction=true when the resolved bank account is Banco de la Nación", () => {
+    const h = {
+      ...baseData().header,
+      bank_account_label: "BN-DETRACCION-001",
+      is_detraction: false,
+    };
+    const errs = resolveHeaderLabelsToIds(h, makeRefs());
+    expect(errs).toHaveLength(0);
+    expect(h.bank_account_id).toBe("bank-bn-1");
+    expect(h.is_detraction).toBe(true);
+  });
+
+  it("derives is_detraction=false for a regular bank account", () => {
+    const h = {
+      ...baseData().header,
+      bank_account_label: "BCP-PEN-001",
+      is_detraction: true, // start true to prove it gets flipped
+    };
+    const errs = resolveHeaderLabelsToIds(h, makeRefs());
+    expect(errs).toHaveLength(0);
+    expect(h.is_detraction).toBe(false);
   });
 });
 
