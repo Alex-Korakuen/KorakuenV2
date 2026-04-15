@@ -509,10 +509,19 @@ type ContactRef = {
   ruc: string | null;
 };
 
+type CostCategoryRef = {
+  id: string;
+  name: string;
+};
+
 export type ResolutionRefs = {
   bankAccounts: BankAccountRef[];
   projects: ProjectRef[];
   contactsByRuc: Map<string, ContactRef>;
+  // Keyed by lowercased category name. Only top-level, active categories
+  // land here — the CSV intake is not allowed to resolve to leaf nodes or
+  // retired rows.
+  costCategoriesByName: Map<string, CostCategoryRef>;
 };
 
 /**
@@ -613,6 +622,48 @@ export function resolveHeaderLabelsToIds(
   } else {
     header.partner_id = null;
   }
+
+  return errors;
+}
+
+/**
+ * Resolve each line's `cost_category_label` into `cost_category_id`,
+ * matching against the preloaded top-level active categories by
+ * case-insensitive name. Blank label = null id (no error). Non-blank
+ * label that doesn't match any active row = error surfaced on the
+ * specific line, so the user sees the exact row to fix.
+ *
+ * Pure — no DB calls. Mutates each line in place and returns any
+ * unresolved-label errors for the caller to merge into the submission's
+ * validation report.
+ */
+export function resolveLineCostCategories(
+  lines: PaymentSubmissionLine[],
+  refs: ResolutionRefs,
+): SubmissionFieldError[] {
+  const errors: SubmissionFieldError[] = [];
+
+  lines.forEach((line, index) => {
+    if (!line.cost_category_label) {
+      line.cost_category_id = null;
+      return;
+    }
+    const key = line.cost_category_label.trim().toLowerCase();
+    if (!key) {
+      line.cost_category_id = null;
+      return;
+    }
+    const found = refs.costCategoriesByName.get(key);
+    if (found) {
+      line.cost_category_id = found.id;
+    } else {
+      line.cost_category_id = null;
+      errors.push({
+        path: `lines[${index}].cost_category`,
+        message: `Categoría de costo "${line.cost_category_label}" no encontrada`,
+      });
+    }
+  });
 
   return errors;
 }

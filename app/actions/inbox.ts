@@ -39,6 +39,7 @@ import {
   validateRejectSubmission,
   validatePaymentSubmissionData,
   resolveHeaderLabelsToIds,
+  resolveLineCostCategories,
   applyPatchToExtractedData,
   type ResolutionRefs,
   type SubmissionPatch,
@@ -154,7 +155,7 @@ export async function createInboxBatch(
 
   for (const [groupId, rows] of groups.entries()) {
     const extracted = buildSubmissionFromGroup(groupId, rows);
-    const fkErrors = await resolveHeaderAndAutoCreateContact(extracted, refs);
+    const fkErrors = await resolveLabelsAndAutoCreateContact(extracted, refs);
     extracted.validation.errors.push(...fkErrors);
     extracted.validation.valid = extracted.validation.errors.length === 0;
     submissions.push({ extractedData: extracted });
@@ -209,21 +210,30 @@ async function loadResolutionRefs(
   supabase: Awaited<ReturnType<typeof createServerClient>>,
   opts: { includeContacts: boolean },
 ): Promise<ValidationResult<ResolutionRefs>> {
-  const [bankResult, projectResult, contactResult] = await Promise.all([
-    supabase
-      .from("bank_accounts")
-      .select("id, name, account_number, account_type")
-      .is("deleted_at", null)
-      .eq("is_active", true),
-    supabase.from("projects").select("id, code").is("deleted_at", null),
-    opts.includeContacts
-      ? supabase
-          .from("contacts")
-          .select("id, ruc")
-          .is("deleted_at", null)
-          .not("ruc", "is", null)
-      : Promise.resolve({ data: [], error: null }),
-  ]);
+  const [bankResult, projectResult, contactResult, costCategoryResult] =
+    await Promise.all([
+      supabase
+        .from("bank_accounts")
+        .select("id, name, account_number, account_type")
+        .is("deleted_at", null)
+        .eq("is_active", true),
+      supabase.from("projects").select("id, code").is("deleted_at", null),
+      opts.includeContacts
+        ? supabase
+            .from("contacts")
+            .select("id, ruc")
+            .is("deleted_at", null)
+            .not("ruc", "is", null)
+        : Promise.resolve({ data: [], error: null }),
+      // Top-level active cost categories only. Matches the project_budgets
+      // validator rule and keeps the CSV matching surface narrow — users
+      // cannot pick a retired row or a sub-category from the flat CSV.
+      supabase
+        .from("cost_categories")
+        .select("id, name")
+        .eq("is_active", true)
+        .is("parent_id", null),
+    ]);
 
   if (bankResult.error) {
     return failure(
@@ -243,6 +253,12 @@ async function loadResolutionRefs(
       `No se pudieron cargar contactos: ${contactResult.error.message}`,
     );
   }
+  if (costCategoryResult.error) {
+    return failure(
+      "NOT_FOUND",
+      `No se pudieron cargar categorías de costo: ${costCategoryResult.error.message}`,
+    );
+  }
 
   const contactsByRuc = new Map<string, { id: string; ruc: string | null }>();
   for (const c of (contactResult.data ?? []) as Array<{
@@ -250,6 +266,17 @@ async function loadResolutionRefs(
     ruc: string | null;
   }>) {
     if (c.ruc) contactsByRuc.set(c.ruc, c);
+  }
+
+  const costCategoriesByName = new Map<
+    string,
+    { id: string; name: string }
+  >();
+  for (const c of (costCategoryResult.data ?? []) as Array<{
+    id: string;
+    name: string;
+  }>) {
+    costCategoriesByName.set(c.name.toLowerCase(), c);
   }
 
   return success({
@@ -264,19 +291,21 @@ async function loadResolutionRefs(
       code: string | null;
     }>,
     contactsByRuc,
+    costCategoriesByName,
   });
 }
 
 /**
- * Apply the pure header resolver, then handle the one DB side effect
- * (SUNAT auto-create for unknown contacts). Pushes any unresolved-label
- * errors onto the passed errors array.
+ * Apply the pure header + line resolvers, then handle the one DB side
+ * effect (SUNAT auto-create for unknown contacts). Pushes any
+ * unresolved-label errors onto the passed errors array.
  */
-async function resolveHeaderAndAutoCreateContact(
+async function resolveLabelsAndAutoCreateContact(
   extracted: PaymentSubmissionExtractedData,
   refs: ResolutionRefs,
 ): Promise<SubmissionFieldError[]> {
   const errors = resolveHeaderLabelsToIds(extracted.header, refs);
+  errors.push(...resolveLineCostCategories(extracted.lines, refs));
   const h = extracted.header;
 
   // Contact: if the RUC didn't match any preloaded contact, try SUNAT.
@@ -1149,18 +1178,21 @@ export async function updateSubmission(
   // 2. Re-resolve FKs only if the patch touched a label field or the
   //    extracted data has any unresolved labels (addLine/deleteLine don't
   //    change labels but we still refresh so nothing goes stale).
-  const touchesLabel =
+  const touchesHeaderLabel =
     patch.kind === "set_header" &&
     (patch.field === "bank_account_label" ||
       patch.field === "project_code" ||
-      patch.field === "contact_ruc");
+      patch.field === "contact_ruc" ||
+      patch.field === "partner_ruc");
+  const touchesLineCategory =
+    patch.kind === "set_line" && patch.field === "cost_category_label";
 
-  if (touchesLabel) {
+  if (touchesHeaderLabel || touchesLineCategory) {
     const refsResult = await loadResolutionRefs(supabase, {
       includeContacts: true,
     });
     if (!refsResult.success) return refsResult as ValidationResult<SubmissionRow>;
-    const fkErrors = await resolveHeaderAndAutoCreateContact(
+    const fkErrors = await resolveLabelsAndAutoCreateContact(
       next,
       refsResult.data,
     );

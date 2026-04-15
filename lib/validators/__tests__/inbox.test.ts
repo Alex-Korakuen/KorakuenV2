@@ -7,6 +7,7 @@ import {
   validateApproveSubmission,
   validateRejectSubmission,
   resolveHeaderLabelsToIds,
+  resolveLineCostCategories,
   applyPatchToExtractedData,
   normalizeDirection,
   normalizeCurrency,
@@ -631,6 +632,26 @@ function makeRefs(
       ["20512345678", { id: "contact-client-1", ruc: "20512345678" }],
       ["20498765432", { id: "contact-vendor-1", ruc: "20498765432" }],
     ]),
+    costCategoriesByName: new Map([
+      ["materiales", { id: "cat-materiales", name: "Materiales" }],
+      ["mano de obra", { id: "cat-mano-obra", name: "Mano de Obra" }],
+      ["otros", { id: "cat-otros", name: "Otros" }],
+    ]),
+    ...overrides,
+  };
+}
+
+function makeLine(
+  overrides: Partial<import("../../types").PaymentSubmissionLine> = {},
+): import("../../types").PaymentSubmissionLine {
+  return {
+    amount: 100,
+    invoice_number_hint: null,
+    outgoing_invoice_id: null,
+    incoming_invoice_id: null,
+    cost_category_label: null,
+    cost_category_id: null,
+    description: null,
     ...overrides,
   };
 }
@@ -707,6 +728,58 @@ describe("resolveHeaderLabelsToIds", () => {
     const errs = resolveHeaderLabelsToIds(h, makeRefs());
     expect(errs).toHaveLength(0);
     expect(h.is_detraction).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveLineCostCategories
+// ---------------------------------------------------------------------------
+
+describe("resolveLineCostCategories", () => {
+  it("resolves a line's cost_category_label to an id (exact match)", () => {
+    const lines = [makeLine({ cost_category_label: "Materiales" })];
+    const errs = resolveLineCostCategories(lines, makeRefs());
+    expect(errs).toHaveLength(0);
+    expect(lines[0].cost_category_id).toBe("cat-materiales");
+  });
+
+  it("resolves a line's cost_category_label case-insensitively", () => {
+    const lines = [makeLine({ cost_category_label: "  mano DE obra  " })];
+    const errs = resolveLineCostCategories(lines, makeRefs());
+    expect(errs).toHaveLength(0);
+    expect(lines[0].cost_category_id).toBe("cat-mano-obra");
+  });
+
+  it("leaves blank labels unresolved without erroring", () => {
+    const lines = [makeLine({ cost_category_label: null })];
+    const errs = resolveLineCostCategories(lines, makeRefs());
+    expect(errs).toHaveLength(0);
+    expect(lines[0].cost_category_id).toBeNull();
+  });
+
+  it("flags a non-matching label on the specific line", () => {
+    const lines = [
+      makeLine({ cost_category_label: "Materiales" }),
+      makeLine({ cost_category_label: "Categoría Inventada" }),
+    ];
+    const errs = resolveLineCostCategories(lines, makeRefs());
+    expect(errs).toHaveLength(1);
+    expect(errs[0].path).toBe("lines[1].cost_category");
+    expect(lines[0].cost_category_id).toBe("cat-materiales");
+    expect(lines[1].cost_category_id).toBeNull();
+  });
+
+  it("resolves every matching line in a multi-line payment", () => {
+    const lines = [
+      makeLine({ cost_category_label: "Materiales" }),
+      makeLine({ cost_category_label: "Otros" }),
+      makeLine({ cost_category_label: null }),
+    ];
+    const errs = resolveLineCostCategories(lines, makeRefs());
+    expect(errs).toHaveLength(0);
+    expect(lines[0].cost_category_id).toBe("cat-materiales");
+    expect(lines[1].cost_category_id).toBe("cat-otros");
+    expect(lines[2].cost_category_id).toBeNull();
   });
 });
 
