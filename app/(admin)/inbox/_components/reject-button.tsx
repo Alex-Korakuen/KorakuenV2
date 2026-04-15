@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -39,14 +40,15 @@ export function RejectButton({ disabled, onConfirm }: Props) {
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
-        <Button
-          size="sm"
-          variant="outline"
+        <button
+          type="button"
           disabled={disabled}
           onClick={(e) => e.stopPropagation()}
+          title="Rechazar"
+          className="inline-flex h-7 w-7 items-center justify-center rounded border border-border bg-background text-muted-foreground transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Rechazar
-        </Button>
+          <X className="h-3.5 w-3.5" />
+        </button>
       </PopoverTrigger>
       <PopoverContent
         align="end"

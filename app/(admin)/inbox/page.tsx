@@ -2,6 +2,7 @@ import { Upload } from "lucide-react";
 import { getInboxSubmissions, getInboxBatches } from "@/app/actions/inbox";
 import { getBankAccounts } from "@/app/actions/bank-accounts";
 import { getProjects } from "@/app/actions/projects";
+import { getContacts } from "@/app/actions/contacts";
 import { getCostCategories } from "@/app/actions/project-budgets";
 import { TopBar } from "@/components/app-shell/top-bar";
 import { Button } from "@/components/ui/button";
@@ -41,6 +42,7 @@ export default async function InboxPage({ searchParams }: Props) {
     banksResult,
     projectsResult,
     costCategoriesResult,
+    partnersResult,
   ] = await Promise.all([
     getInboxSubmissions({
       review_status: reviewStatus,
@@ -51,6 +53,7 @@ export default async function InboxPage({ searchParams }: Props) {
     getBankAccounts({ is_active: true }),
     getProjects(),
     getCostCategories(),
+    getContacts({ is_partner: true }),
   ]);
 
   const submissions = submissionsResult.success
@@ -66,6 +69,7 @@ export default async function InboxPage({ searchParams }: Props) {
   const costCategories = costCategoriesResult.success
     ? costCategoriesResult.data
     : [];
+  const partners = partnersResult.success ? partnersResult.data.data : [];
 
   return (
     <div>
@@ -113,6 +117,7 @@ export default async function InboxPage({ searchParams }: Props) {
             bankAccounts={bankAccounts}
             projects={projects}
             costCategories={costCategories}
+            partners={partners}
           />
         </div>
 
