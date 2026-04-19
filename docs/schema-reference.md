@@ -318,12 +318,19 @@ Admin-managed list of cost categories. Used to tag incoming invoices and payment
 lines for cost breakdown reporting. Reporting is always done at the payment line
 level — the invoice tag is for reference and filtering only.
 
-Seed data:
+Seed data (canonical 11-category taxonomy, all top-level):
 ```
 Materiales
 Mano de Obra
-Alquiler de Equipos
-Viáticos
+Servicios Terceros
+Alquiler Equipos
+Herramientas
+Seguridad y Salud
+Transporte
+Gastos Operativos
+Viáticos Ingenieros
+Socios
+Otros
 ```
 
 ```sql

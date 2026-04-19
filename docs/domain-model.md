@@ -88,7 +88,7 @@ significantly enough to require a new contract, it is a new project.
 
 A project's estimated cost is not stored as a column on `projects`. It is the sum
 of the project's `project_budgets` rows. Budgets are tagged with a top-level
-`cost_category_id` (Materiales, Mano de Obra, Alquiler de Equipos, etc.) and
+`cost_category_id` (Materiales, Mano de Obra, Servicios Terceros, etc.) and
 amounts are always in PEN — budgets are internal planning and the reporting
 currency is PEN. Purchases in USD convert to PEN at payment time and show up
 against the PEN budget naturally.
